@@ -1,0 +1,2 @@
+# https://github.com/scrapy/scrapy — used by tools/scrapy-fetch/fetch_one.py (Lore web fetch, optional)
+scrapy>=2.11,<3

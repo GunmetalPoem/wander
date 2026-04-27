@@ -1,0 +1,40 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Quest {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  title       String
+  loreBlurb   String
+  description String
+  steps       String   @default("[]") // JSON string: string[]
+  locationName String?
+  lat         Float?
+  lng         Float?
+  difficulty  Int      // 1–5
+  safetyScore Int      // 1–5 (higher = more risk)
+  warnings    String   @default("[]") // JSON string: string[]
+  category    String   // tradition | urban_exploration | social | history | challenge
+  status      String   @default("draft") // draft | published
+  confidence  Float?
+  sourceUrl   String?
+  rawScrapeId String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  rawScrape RawScrape? @relation(fields: [rawScrapeId], references: [id], onDelete: SetNull)
+}
+
+model RawScrape {
+  id        String   @id @default(cuid())
+  url       String
+  rawText   String
+  createdAt DateTime @default(now())
+  quests    Quest[]
+}
