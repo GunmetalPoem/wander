@@ -172,34 +172,38 @@ function walkTripObject(t: Record<string, unknown>, fallbackCity: string): Recor
   return { ...t, city, city_center: center, days: withStops };
 }
 
-function mapStopObject(s: unknown, cityCenter: { lat: number; lng: number } | null, city: string) {
+function isCoordNullish(v: unknown): boolean {
+  return v == null || v === "" || (typeof v === "string" && v.toLowerCase() === "null");
+}
+
+function mapStopObject(s: unknown, _cityCenter: { lat: number; lng: number } | null, city: string) {
   if (s == null) return null;
   if (typeof s !== "object" || Array.isArray(s)) return null;
   const o = s as Record<string, unknown>;
   const latIn = o.lat != null ? o.lat : o.latitude;
   const lngIn = o.lng != null ? o.lng : o.longitude;
-  const tryLat =
-    latIn == null || latIn === "" ? NaN : looseNum(latIn, NaN, -90, 90);
-  const tryLng =
-    lngIn == null || lngIn === "" ? NaN : looseNum(lngIn, NaN, -180, 180);
-  let lat = Number.isFinite(tryLat) ? tryLat : (cityCenter?.lat ?? NaN);
-  let lng = Number.isFinite(tryLng) ? tryLng : (cityCenter?.lng ?? NaN);
-  if (!Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0 && !cityCenter)) {
-    if (cityCenter) {
-      lat = cityCenter.lat;
-      lng = cityCenter.lng;
+
+  let lat: number | null;
+  let lng: number | null;
+  if (isCoordNullish(latIn) && isCoordNullish(lngIn)) {
+    lat = null;
+    lng = null;
+  } else {
+    const tryLat = isCoordNullish(latIn) ? NaN : looseNum(latIn, NaN, -90, 90);
+    const tryLng = isCoordNullish(lngIn) ? NaN : looseNum(lngIn, NaN, -180, 180);
+    if (Number.isFinite(tryLat) && Number.isFinite(tryLng) && !(tryLat === 0 && tryLng === 0)) {
+      lat = tryLat;
+      lng = tryLng;
     } else {
-      return null;
+      lat = null;
+      lng = null;
     }
-  }
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-    return null;
   }
   const id = typeof o.id === "string" && o.id.trim() ? o.id : `stop_${Math.random().toString(36).slice(2, 10)}`;
   const name =
     (typeof o.name === "string" && o.name.trim() ? o.name : null) ??
-    (typeof o.title === "string" ? o.title : null) ??
-    (typeof o.place === "string" ? o.place : null) ??
+    (typeof o.title === "string" && (o.title as string).trim() ? (o.title as string) : null) ??
+    (typeof o.place === "string" && (o.place as string).trim() ? (o.place as string) : null) ??
     "Unnamed place";
   const address =
     (typeof o.address === "string" && o.address.trim() ? o.address : null) ??
@@ -217,6 +221,8 @@ function mapStopObject(s: unknown, cityCenter: { lat: number; lng: number } | nu
   const travel_minutes_to_next =
     travel == null ? (typeof o.travel_time_minutes === "number" ? o.travel_time_minutes : null) : (typeof travel === "number" && Number.isFinite(travel) ? travel : null);
 
+  const locationResolved = lat != null && lng != null ? undefined : false;
+
   return {
     id,
     name: name.slice(0, 200),
@@ -229,6 +235,7 @@ function mapStopObject(s: unknown, cityCenter: { lat: number; lng: number } | nu
     description: String(description).slice(0, 2000),
     transition_to_next: String(transition_to_next).slice(0, 1000),
     travel_minutes_to_next: travel_minutes_to_next as number | null,
+    locationResolved,
   };
 }
 
@@ -236,8 +243,8 @@ const StopSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   address: z.string().min(1),
-  lat: z.number().min(-90).max(90),
-  lng: z.number().min(-180).max(180),
+  lat: z.union([z.number().min(-90).max(90), z.null()]),
+  lng: z.union([z.number().min(-180).max(180), z.null()]),
   category: z.string().min(1),
   duration_minutes: z.number().int().min(5).max(480).optional().default(60),
   best_time: z
@@ -251,6 +258,10 @@ const StopSchema = z.object({
       (v) => (v == null || v === "" ? v : Number(v)),
       z.union([z.number(), z.null()]).optional(),
     ),
+  locationResolved: z.boolean().optional(),
+  locationConfidence: z.number().min(0).max(1).optional(),
+  resolvedName: z.string().optional(),
+  resolvedAddress: z.string().optional(),
 });
 
 const DaySchema = z.object({
@@ -275,6 +286,13 @@ export type TripDay = z.infer<typeof DaySchema>;
 
 export type TripFormInput = {
   city: string;
+  /** Set when the user picks a place (or a single unambiguous match) — sent to the server to pin the right city. */
+  cityCenter: { lat: number; lng: number } | null;
+  /**
+   * When false, several city matches exist and the user must pick from the dropdown.
+   * Prevents generating a trip in the wrong state.
+   */
+  cityLocationReady: boolean;
   days: number;
   groupSize: number;
   budget: (typeof budgetOptions)[number];
@@ -286,6 +304,9 @@ export type TripFormInput = {
 
 export const defaultTripForm: TripFormInput = {
   city: "San Francisco",
+  cityCenter: null,
+  /** Becomes true after the first city-candidates lookup (or on explicit demo load). */
+  cityLocationReady: false,
   days: 1,
   groupSize: 2,
   budget: "mid",

@@ -91,7 +91,7 @@ export default async function QuestPage({ params }: { params: { slug: string } }
       )}
 
       <section className="space-y-3">
-        <h2 className="font-serif text-xl text-parchment">Lore</h2>
+        <h2 className="font-serif text-xl text-parchment">Details</h2>
         <p className="whitespace-pre-wrap text-sm leading-relaxed text-parchment/80">{quest.description}</p>
       </section>
 

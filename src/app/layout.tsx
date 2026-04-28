@@ -14,8 +14,9 @@ const literata = Literata({
 });
 
 export const metadata: Metadata = {
-  title: "Wanderday — 3D trip planner",
-  description: "AI itineraries with Mapbox maps, routing, and drag-to-reorder days.",
+  title: "Wander — trip planner & quests",
+  description:
+    "Wander: AI itineraries with Mapbox, routing, city confirmation, and a quest feed with Lab tools.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -32,7 +33,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 Planner
               </Link>
               <Link href="/lore" className="hover:text-parchment">
-                Lore feed
+                Quest feed
               </Link>
               <Link href="/admin" className="hover:text-parchment">
                 Lab
@@ -43,8 +44,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <main className="w-full min-h-0 flex-1 overflow-x-hidden px-4 py-4">{children}</main>
         <footer className="mx-auto max-w-[1600px] px-4 py-6 text-xs text-parchment/50">
           Mapbox © Mapbox, OpenStreetMap. Routing is indicative; check traffic and closures. AI steps may be wrong—verify
-          every stop. Lore (legacy) feed: <Link href="/lore" className="text-ember/90 hover:underline">/lore</Link>
-          .
+          every stop. <Link href="/lore" className="text-ember/90 hover:underline">Quest feed</Link> (URL{" "}
+          <code className="text-parchment/70">/lore</code>).
         </footer>
       </body>
     </html>

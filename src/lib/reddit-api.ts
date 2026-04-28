@@ -1,6 +1,6 @@
 /** Minimal Reddit OAuth client-credentials wrapper (read-only). */
 const UA =
-  "Lore/0.1 (+https://github.com) reddit client; educational project - contact if problematic";
+  "Wander/0.1 (+https://github.com/GunmetalPoem/wander) reddit client; educational project - contact if problematic";
 
 type TokenCache = { token: string; expiresAtMs: number } | null;
 let cache: TokenCache = null;

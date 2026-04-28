@@ -195,7 +195,7 @@ export async function POST(req: Request) {
       {
         code: "no_quests_extracted" as const,
         error:
-          "The parser returned zero quests. That can happen when the gathered text has no passage that clearly matches strict Lore rules (inventing rituals is not allowed) or the model is uncertain. A RawScrape was still saved for debugging.",
+          "The parser returned zero quests. That can happen when the gathered text has no passage that clearly matches strict quest rules (inventing rituals is not allowed) or the model is uncertain. A RawScrape was still saved for debugging.",
         hint:
           "Try Advanced with one strong URL (article or thread), a more specific place (e.g. full school name), or a different phrasing. Discovery uses Reddit and DuckDuckGo queries, not random URLs.",
         rawScrapeId: raw.id,

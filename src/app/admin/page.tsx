@@ -208,11 +208,11 @@ export default function AdminPage() {
   return (
     <div className="mx-auto max-w-5xl space-y-8">
       <div>
-        <h1 className="font-serif text-3xl text-parchment">Lore Lab</h1>
+        <h1 className="font-serif text-3xl text-parchment">Wander Lab</h1>
         <p className="mt-2 max-w-2xl text-sm text-parchment/70">
           Type any place — city, neighborhood, or school name. The server runs targeted Reddit and DuckDuckGo queries
           (not made-up URLs), fetches the threads and pages it finds, and ranks them for relevance. It skips Wikipedia
-          bodies and a lot of travel/SEO sites. If the AI finds nothing that clearly fits strict Lore rules, you get zero
+          bodies and a lot of travel/SEO sites. If the AI finds nothing that clearly fits strict quest rules, you get zero
           drafts but a raw scrape is kept for inspection. Open-Meteo geocodes the name (no key). Clear the place field
           and use Advanced to scrape a single URL instead. You must **confirm** the place from the search
           list so the geocoder does not attach the wrong area (e.g. Stanford, CA vs. Stanford elsewhere).
@@ -303,7 +303,7 @@ export default function AdminPage() {
             onClick={() => void runScrape()}
             className="rounded-full bg-ember px-5 py-2 text-sm font-medium text-white transition hover:bg-orange-600 disabled:opacity-50"
           >
-            {busy ? "Working…" : "Gather lore for this place + parse with AI"}
+            {busy ? "Working…" : "Gather sources for this place + parse with AI"}
           </button>
           <button
             type="button"

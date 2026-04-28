@@ -90,7 +90,7 @@ export async function fetchPageText(
   const res = await fetch(url, {
     headers: {
       "user-agent":
-        "LoreBot/0.1 (+https://github.com) research scraper; educational project - contact site owner if problematic",
+        "WanderBot/0.1 (+https://github.com/GunmetalPoem/wander) research scraper; educational project - contact site owner if problematic",
       accept: "text/html,application/xhtml+xml",
     },
     redirect: "follow",

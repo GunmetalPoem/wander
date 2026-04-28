@@ -7,12 +7,13 @@ import {
   defaultTripForm,
   normalizeTripJsonPayload,
 } from "@/lib/trip-schema";
+import { getGoogleGeoKeyFromEnv, refineTripPlanWithMapbox } from "@/lib/trip-geocode";
 import { z } from "zod";
 
 export const maxDuration = 120;
 
 const RequestBodySchema = z.object({
-  city: z.string().min(1).max(120),
+  city: z.string().min(1).max(200),
   days: z.number().int().min(1).max(14).optional(),
   groupSize: z.number().int().min(1).max(50).optional(),
   budget: z.enum(["budget", "mid", "splurge"]).optional(),
@@ -20,13 +21,14 @@ const RequestBodySchema = z.object({
   vibes: z.array(z.string()).optional(),
   mustInclude: z.string().max(2000).optional(),
   transport: z.enum(["walking", "driving"]).optional(),
+  cityCenter: z.object({ lat: z.number(), lng: z.number() }).nullish(),
 });
 
 const SYSTEM = `You are a travel planner API. You output ONLY valid JSON (no markdown fences) matching this structure:
 {
   "trip": {
     "city": string,
-    "city_center": { "lat": number, "lng": number }  // rough center of the city for map framing,
+    "city_center": { "lat": number, "lng": number }  // rough map center of the city (WGS84); used for map framing and search bias,
     "days": [
       {
         "day": 1,
@@ -34,10 +36,10 @@ const SYSTEM = `You are a travel planner API. You output ONLY valid JSON (no mar
         "stops": [
           {
             "id": "unique_id",
-            "name": "Place name",
-            "address": "Full street address for geocoding",
-            "lat": 0,
-            "lng": 0,
+            "name": "Place or venue name (exact as people search for it)",
+            "address": "Full street address or best-known address string for the place and city",
+            "lat": null,
+            "lng": null,
             "category": "outdoor|foodie|art|history|...",
             "duration_minutes": 45,
             "best_time": "early_morning|morning|midday|afternoon|evening|night",
@@ -52,11 +54,13 @@ const SYSTEM = `You are a travel planner API. You output ONLY valid JSON (no mar
 }
 
 Rules:
-- Use real places with accurate lat/lng (WGS84) for the requested city. Prefer walkable order for walking transport.
+- Return null for "lat" and "lng" on every stop. Only return name, address, city (via "city"), and descriptions. Do not guess or invent coordinates.
+- "city_center" is the only place you give approximate map coordinates: use a real central point in the destination city (WGS84).
+- Use real, verifiable places. Prefer a walkable order for walking transport.
 - 3-8 stops per day depending on pace: packed=more, relaxed=fewer.
 - Each stop must have unique "id" strings.
 - Descriptions must be specific and useful, not generic.
-- "travel_minutes_to_next" is your estimate; it will be refined with routing later.
+- "travel_minutes_to_next" is your estimate; it may be refined with routing later.
 - If the city is ambiguous, pick the well-known one (e.g. "SF" = San Francisco, USA).`;
 
 export async function POST(req: Request) {
@@ -73,6 +77,8 @@ export async function POST(req: Request) {
   const b = parsed.data;
   const input: TripFormInput = {
     city: b.city,
+    cityCenter: b.cityCenter ?? null,
+    cityLocationReady: true,
     days: b.days ?? defaultTripForm.days,
     groupSize: b.groupSize ?? defaultTripForm.groupSize,
     budget: b.budget ?? defaultTripForm.budget,
@@ -154,5 +160,21 @@ Return the JSON object only.`;
     );
   }
 
-  return NextResponse.json({ plan: out.data, provider: anthropicKey ? "anthropic" : "openai" });
+  let plan = out.data;
+  const mapboxToken =
+    (process.env.MAPBOX_ACCESS_TOKEN?.trim() ?? process.env.NEXT_PUBLIC_MAPBOX_TOKEN?.trim()) || null;
+  const googleKey = getGoogleGeoKeyFromEnv();
+  if (mapboxToken || googleKey) {
+    try {
+      const confirmed =
+        b.cityCenter != null && Number.isFinite(b.cityCenter.lat) && Number.isFinite(b.cityCenter.lng)
+          ? { lat: b.cityCenter.lat, lng: b.cityCenter.lng }
+          : null;
+      plan = await refineTripPlanWithMapbox(plan, input.city, mapboxToken, googleKey, confirmed);
+    } catch {
+      // Keep model output if geocoding fails (rate limit, network, etc.)
+    }
+  }
+
+  return NextResponse.json({ plan, provider: anthropicKey ? "anthropic" : "openai" });
 }

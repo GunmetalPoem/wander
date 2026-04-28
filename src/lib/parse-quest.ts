@@ -196,13 +196,13 @@ Return a single new JSON object only, same shape {"quests":[...]}.
 Every quest must have: a specific "title" (not "Untitled"), "sourcesSay" with 3+ sentences that quote or paraphrase the SOURCE text with at least one proper noun when one appears, non-empty "loreBlurb", and a real "description" (not "No"). 
 If the sources still will not support a grounded quest, return {"quests":[]}.`;
 
-const SYSTEM = `You extract evidence-grounded "quests" for an app called Lore. Lore is for HYPERLOCAL campus/city stuff people do, hear, or look for: named places, hikes, rumors about a real spot, pranks, streaks, "before you graduate" rituals, and oral history about THIS place. It is NOT for generic education policy, national admissions drama, or sociology essays where the school is only a backdrop.
+const SYSTEM = `You extract evidence-grounded "quests" for an app called Wander. Wander is for HYPERLOCAL campus/city stuff people do, hear, or look for: named places, hikes, rumors about a real spot, pranks, streaks, "before you graduate" rituals, and oral history about THIS place. It is NOT for generic education policy, national admissions drama, or sociology essays where the school is only a backdrop.
 
 PRIORITY (when several topics appear in the SOURCE blocks, you MUST favor higher-priority rows first, and you may OMIT lower-priority topics entirely):
 - HIGHEST: named geography or routes (cave, dish, quarry, trail, fountain, reserve, dish antenna area, "beyond the fence", specific building nicknames, tunnel, roof access stories, "secret spot" with directions requests).
 - HIGH: recurring student/city rituals, streaks, organized hikes, pranks, newspaper-named traditions, "does anyone know where X is" oral rumor threads about a local place.
 - LOWER: quirky social threads still tied to campus life and proper nouns in the post.
-- LOWEST / AVOID as a Lore quest unless NOTHING higher exists in the sources: national or generic "college access" anecdotes; counselor/admissions pressure stories; "crab bucket" or other abstract metaphors; Rwanda/Grambling/remote place examples used to illustrate a general point; any story where the target school is just where someone "got in" or "chose" but the plot is not about that campus, its places, or its community lore. If your only material is in this bucket, return {"quests": []} or pick a different SOURCE block that matches HIGHEST/HIGH.
+- LOWEST / AVOID as a Wander quest unless NOTHING higher exists in the sources: national or generic "college access" anecdotes; counselor/admissions pressure stories; "crab bucket" or other abstract metaphors; Rwanda/Grambling/remote place examples used to illustrate a general point; any story where the target school is just where someone "got in" or "chose" but the plot is not about that campus, its places, or its community stories. If your only material is in this bucket, return {"quests": []} or pick a different SOURCE block that matches HIGHEST/HIGH.
 
 "social" category means campus-specific group traditions or challenges, NOT "social issues" or equity essays. Prefer urban_exploration or tradition when a thread is about finding a cave, the Dish, or similar.
 
@@ -255,7 +255,7 @@ Return shape: {"quests":[...]}.
 Return {"quests":[]} if every block is off-topic, pure politics, travel spam, OR if the only on-topic content is the LOWEST bucket and no HIGHEST/HIGH row exists, OR you cannot meet OUTPUT CONTRACT. Otherwise return 1-3 quests that follow the PRIORITY section (Encyclopedia Cave / Dish / quarry style beats generic admissions anecdote).`;
 
 /** When strict pass is empty, still ground in SOURCES but allow weaker / LOWER-bucket material so curators get a starting point. */
-const SYSTEM_RELAXED = `You extract evidence-grounded "quests" for an app called Lore. You are in RELAXED follow-up mode: a previous pass returned zero quests from the same SOURCE blocks.
+const SYSTEM_RELAXED = `You extract evidence-grounded "quests" for an app called Wander. You are in RELAXED follow-up mode: a previous pass returned zero quests from the same SOURCE blocks.
 
 Your job: return 1-3 quests if ANY [SOURCE] block plausibly touches local student life, campus, named places, rumors, oral threads, "has anyone…", or city/university life tied to the target, even if mixed with generic discussion. You MAY use LOWER-bucket and thin rumor threads; still do NOT invent facts, societies, or rituals. Every claim in sourcesSay must still trace to a SOURCE line.
 

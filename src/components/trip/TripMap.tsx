@@ -27,12 +27,30 @@ function stopsForDay(plan: TripPlan, day: number): TripStop[] {
   return d?.stops ?? [];
 }
 
+function hasStopCoords(s: TripStop): s is TripStop & { lat: number; lng: number } {
+  return (
+    typeof s.lat === "number" &&
+    typeof s.lng === "number" &&
+    Number.isFinite(s.lat) &&
+    Number.isFinite(s.lng)
+  );
+}
+
+function firstResolvedStop(plan: TripPlan): (TripStop & { lat: number; lng: number }) | null {
+  for (const d of plan.trip.days) {
+    for (const s of d.stops) {
+      if (hasStopCoords(s)) return s;
+    }
+  }
+  return null;
+}
+
 function centerForPlan(plan: TripPlan): { lat: number; lng: number; zoom: number } {
   const c = plan.trip.city_center;
-  if (c) {
+  if (c && Number.isFinite(c.lat) && Number.isFinite(c.lng)) {
     return { lat: c.lat, lng: c.lng, zoom: 12 };
   }
-  const first = plan.trip.days[0]?.stops[0];
+  const first = firstResolvedStop(plan);
   if (first) {
     return { lat: first.lat, lng: first.lng, zoom: 12 };
   }
@@ -50,6 +68,8 @@ export function TripMap({
 }: Props) {
   const mapRef = useRef<MapRef>(null);
   const stops = useMemo(() => stopsForDay(plan, activeDay), [plan, activeDay]);
+  const resolvedStops = useMemo(() => stops.filter(hasStopCoords), [stops]);
+  const unresolvedCount = stops.length - resolvedStops.length;
   const c = useMemo(() => centerForPlan(plan), [plan]);
 
   const initialView = useMemo(
@@ -78,7 +98,7 @@ export function TripMap({
   useEffect(() => {
     if (!selectedStopId) return;
     const s = stops.find((x) => x.id === selectedStopId);
-    if (s) flyTo(s.lat, s.lng);
+    if (s && hasStopCoords(s)) flyTo(s.lat, s.lng);
   }, [selectedStopId, stops, flyTo]);
 
   if (!mapboxToken) {
@@ -119,30 +139,41 @@ export function TripMap({
             />
           </Source>
         )}
-        {stops.map((s, i) => (
-          <Marker
-            key={s.id}
-            longitude={s.lng}
-            latitude={s.lat}
-            anchor="bottom"
-            onClick={(e) => {
-              e.originalEvent?.stopPropagation?.();
-              onSelectStop(s.id);
-            }}
-          >
-            <button
-              type="button"
-              className={`flex h-8 w-8 -translate-y-0.5 items-center justify-center rounded-full border-2 text-xs font-bold shadow-lg transition ${
-                selectedStopId === s.id
-                  ? "border-ember bg-ember text-white"
-                  : "border-white/80 bg-black/80 text-parchment hover:border-ember"
-              }`}
-              aria-label={s.name}
+        {unresolvedCount > 0 && (
+          <div className="absolute bottom-3 right-3 z-10 max-w-[220px] rounded-lg border border-amber-500/30 bg-black/80 px-2.5 py-1.5 text-[10px] text-amber-200/90">
+            {unresolvedCount} {unresolvedCount === 1 ? "stop" : "stops"} with no map pin (place could not be matched in this
+            area).
+          </div>
+        )}
+        {resolvedStops.map((s) => {
+          const i = stops.findIndex((x) => x.id === s.id);
+          return (
+            <Marker
+              key={s.id}
+              longitude={s.lng}
+              latitude={s.lat}
+              anchor="center"
+              onClick={(e) => {
+                e.originalEvent?.stopPropagation?.();
+                onSelectStop(s.id);
+              }}
             >
-              {i + 1}
-            </button>
-          </Marker>
-        ))}
+              <button
+                type="button"
+                className={`flex h-8 w-8 items-center justify-center rounded-full border-2 text-xs font-bold shadow-lg transition ${
+                  selectedStopId === s.id
+                    ? "border-ember bg-ember text-white"
+                    : "border-white/80 bg-black/80 text-parchment hover:border-ember"
+                } ${
+                  s.locationConfidence != null && s.locationConfidence < 0.6 ? "ring-2 ring-amber-500/60" : ""
+                }`}
+                aria-label={s.name}
+              >
+                {i < 0 ? 1 : i + 1}
+              </button>
+            </Marker>
+          );
+        })}
         {extraMarkers.map((m) => (
           <Marker key={m.id} longitude={m.lng} latitude={m.lat} anchor="center">
             <span

@@ -1,6 +1,7 @@
 "use client";
 
 import { budgetOptions, defaultTripForm, paceOptions, vibeOptions, type TripFormInput } from "@/lib/trip-schema";
+import { CityConfirmField } from "./CityConfirmField";
 
 type Props = {
   value: TripFormInput;
@@ -13,14 +14,7 @@ type Props = {
 export function TripForm({ value, onChange, onSubmit, onLoadDemo, busy }: Props) {
   return (
     <div className="space-y-4 rounded-2xl border border-white/10 bg-black/30 p-4 text-sm text-parchment/90">
-      <div>
-        <label className="text-xs text-parchment/50">City</label>
-        <input
-          className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-parchment outline-none focus:border-ember/60"
-          value={value.city}
-          onChange={(e) => onChange({ ...value, city: e.target.value })}
-        />
-      </div>
+      <CityConfirmField value={value} onChange={onChange} />
       <div className="grid grid-cols-2 gap-2">
         <div>
           <label className="text-xs text-parchment/50">Days</label>
@@ -137,7 +131,7 @@ export function TripForm({ value, onChange, onSubmit, onLoadDemo, busy }: Props)
         <button
           type="button"
           onClick={onSubmit}
-          disabled={busy}
+          disabled={busy || !value.cityLocationReady}
           className="rounded-lg bg-ember px-4 py-2.5 text-sm font-medium text-white disabled:opacity-50"
         >
           {busy ? "Planning…" : "Generate trip"}

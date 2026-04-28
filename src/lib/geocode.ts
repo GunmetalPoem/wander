@@ -1,6 +1,6 @@
 /** ASCII-only: fetch() header values must be ByteString. */
 const UA =
-  "Lore/0.1 (+https://github.com) geocoder; educational project - contact if problematic";
+  "Wander/0.1 (+https://github.com/GunmetalPoem/wander) geocoder; educational project - contact if problematic";
 
 export type Geo = { name: string; lat: number; lng: number };
 

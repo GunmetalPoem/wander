@@ -10,7 +10,7 @@ import { type Geo, geocodeFirst } from "@/lib/geocode";
 
 /** ASCII-only: fetch() header values must be ByteString. */
 const UA =
-  "Lore/0.1 (+https://github.com) location gatherer; educational project - contact if problematic";
+  "Wander/0.1 (+https://github.com/GunmetalPoem/wander) location gatherer; educational project - contact if problematic";
 
 export type { Geo };
 

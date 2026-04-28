@@ -123,6 +123,22 @@ export function TripTimeline({
                           {row.stop.name}
                         </button>
                         <p className="line-clamp-2 text-xs text-parchment/55">{row.stop.address}</p>
+                        {!(
+                          row.stop.lat != null &&
+                          row.stop.lng != null &&
+                          Number.isFinite(row.stop.lat) &&
+                          Number.isFinite(row.stop.lng)
+                        ) && (
+                          <p className="mt-0.5 text-[10px] text-amber-500/90">Location not on map — place could not be matched.</p>
+                        )}
+                        {row.stop.lat != null &&
+                          row.stop.lng != null &&
+                          Number.isFinite(row.stop.lat) &&
+                          Number.isFinite(row.stop.lng) &&
+                          row.stop.locationConfidence != null &&
+                          row.stop.locationConfidence < 0.6 && (
+                            <p className="mt-0.5 text-[10px] text-amber-500/75">Location approximate — name match was weak.</p>
+                          )}
                         {row.travelMinsToNext != null && i < scheduled.length - 1 && (
                           <p className="mt-1 text-[10px] text-parchment/40">
                             +~{row.travelMinsToNext} min travel to next

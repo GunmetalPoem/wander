@@ -7,7 +7,7 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
-const UA = "LoreBot/0.1 (+https://github.com) ferret; educational - contact if problematic";
+const UA = "WanderBot/0.1 (+https://github.com/GunmetalPoem/wander) ferret; educational - contact if problematic";
 
 function ferretBinary(): string {
   return (process.env.FERRET_PATH ?? "ferret").trim() || "ferret";

@@ -15,7 +15,7 @@ const categories = [
 
 type Search = { category?: string; maxRisk?: string };
 
-export default async function LoreFeedPage({ searchParams }: { searchParams: Search }) {
+export default async function QuestFeedPage({ searchParams }: { searchParams: Search }) {
   const category = categories.some((c) => c.id === searchParams.category)
     ? searchParams.category
     : undefined;

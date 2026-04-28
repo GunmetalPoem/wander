@@ -67,7 +67,10 @@ export function TripPlannerClient() {
       setLegs([]);
       return;
     }
-    if (currentStops.length < 2) {
+    const coordStops = currentStops.filter(
+      (s) => typeof s.lat === "number" && typeof s.lng === "number" && Number.isFinite(s.lat) && Number.isFinite(s.lng),
+    );
+    if (coordStops.length < 2 || coordStops.length !== currentStops.length) {
       setRouteFeature(null);
       setLegs([]);
       return;
@@ -79,7 +82,7 @@ export function TripPlannerClient() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           profile: form.transport,
-          coordinates: currentStops.map((s) => [s.lng, s.lat] as [number, number]),
+          coordinates: coordStops.map((s) => [s.lng, s.lat] as [number, number]),
         }),
       });
       if (!res.ok || cancelled) {
@@ -112,10 +115,15 @@ export function TripPlannerClient() {
       setNearby([]);
       return;
     }
+    const { lat, lng } = s;
+    if (lat == null || lng == null || !Number.isFinite(lat) || !Number.isFinite(lng)) {
+      setNearby([]);
+      return;
+    }
     let cancelled = false;
     (async () => {
       const res = await fetch(
-        `/api/trip/nearby?lat=${encodeURIComponent(s.lat)}&lng=${encodeURIComponent(s.lng)}&type=lunch`,
+        `/api/trip/nearby?lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}&type=lunch`,
       );
       if (!res.ok || cancelled) return;
       const data = (await res.json()) as {
@@ -138,6 +146,7 @@ export function TripPlannerClient() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           city: form.city,
+          cityCenter: form.cityCenter,
           days: form.days,
           groupSize: form.groupSize,
           budget: form.budget,
@@ -166,7 +175,12 @@ export function TripPlannerClient() {
 
   const onLoadDemo = useCallback(() => {
     setErr(null);
-    setForm({ ...form, city: "San Francisco" });
+    setForm({
+      ...form,
+      city: "San Francisco, California, United States",
+      cityCenter: { lat: 37.7749, lng: -122.4194 },
+      cityLocationReady: true,
+    });
     setPlan(demoTripSanFrancisco);
     setActiveDay(1);
     setSelectedStopId(demoTripSanFrancisco.trip.days[0]!.stops[0]!.id);
