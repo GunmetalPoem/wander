@@ -230,7 +230,54 @@ async function mapboxSearchBoxForward(
   return Array.isArray(j.features) ? j.features : [];
 }
 
-type GoogleResult = { name: string; lat: number; lng: number; formattedAddress?: string };
+type GoogleResult = {
+  name: string;
+  lat: number;
+  lng: number;
+  formattedAddress?: string;
+  placeId?: string;
+  types?: string[];
+  priceLevel?: number;
+};
+
+type GooglePlaceDetails = {
+  website?: string;
+  formatted_phone_number?: string;
+  international_phone_number?: string;
+  opening_hours?: { weekday_text?: string[] };
+  price_level?: number;
+  types?: string[];
+  wheelchair_accessible_entrance?: boolean;
+  url?: string;
+};
+
+async function googlePlaceDetails(placeId: string, key: string): Promise<GooglePlaceDetails | null> {
+  const u = new URL("https://maps.googleapis.com/maps/api/place/details/json");
+  u.searchParams.set(
+    "fields",
+    [
+      "website",
+      "formatted_phone_number",
+      "international_phone_number",
+      "opening_hours/weekday_text",
+      "price_level",
+      "types",
+      "wheelchair_accessible_entrance",
+      "url",
+    ].join(","),
+  );
+  u.searchParams.set("place_id", placeId);
+  u.searchParams.set("key", key);
+  const res = await fetch(u.toString(), { next: { revalidate: 0 } });
+  if (!res.ok) return null;
+  const j = (await res.json()) as { status: string; error_message?: string; result?: GooglePlaceDetails };
+  if (j.status === "REQUEST_DENIED" || j.status === "INVALID_REQUEST") {
+    console.error("[trip-geocode] Google Place Details:", j.status, j.error_message);
+    return null;
+  }
+  if (j.status !== "OK" || !j.result) return null;
+  return j.result;
+}
 
 /**
  * Text Search (legacy) with optional location+radius biasing to the trip city.
@@ -253,6 +300,9 @@ async function googlePlacesTextSearch(
     results?: Array<{
       name: string;
       formatted_address?: string;
+      place_id?: string;
+      types?: string[];
+      price_level?: number;
       geometry?: { location?: { lat?: number; lng?: number } };
     }>;
   };
@@ -271,7 +321,15 @@ async function googlePlacesTextSearch(
     const ln = r.geometry?.location?.lng;
     if (typeof la !== "number" || typeof ln !== "number" || !r.name) continue;
     if (!Number.isFinite(la) || !Number.isFinite(ln)) continue;
-    out.push({ name: r.name, lat: la, lng: ln, formattedAddress: r.formatted_address });
+    out.push({
+      name: r.name,
+      lat: la,
+      lng: ln,
+      formattedAddress: r.formatted_address,
+      placeId: r.place_id,
+      types: r.types,
+      priceLevel: typeof r.price_level === "number" && Number.isFinite(r.price_level) ? r.price_level : undefined,
+    });
   }
   return out;
 }
@@ -285,7 +343,7 @@ async function googleFindPlaceFromText(
   const u = new URL("https://maps.googleapis.com/maps/api/place/findplacefromtext/json");
   u.searchParams.set("input", input.slice(0, MAX_QUERY));
   u.searchParams.set("inputtype", "textquery");
-  u.searchParams.set("fields", "name,geometry/location,formatted_address");
+  u.searchParams.set("fields", "place_id,name,types,price_level,geometry/location,formatted_address");
   u.searchParams.set("locationbias", `circle:${MAX_RADIUS_M}@${near.lat},${near.lng}`);
   u.searchParams.set("key", key);
   const res = await fetch(u.toString(), { next: { revalidate: 0 } });
@@ -294,7 +352,10 @@ async function googleFindPlaceFromText(
     status: string;
     error_message?: string;
     candidates?: Array<{
+      place_id?: string;
       name: string;
+      types?: string[];
+      price_level?: number;
       formatted_address?: string;
       geometry?: { location?: { lat?: number; lng?: number } };
     }>;
@@ -309,7 +370,15 @@ async function googleFindPlaceFromText(
   const la = c.geometry?.location?.lat;
   const ln = c.geometry?.location?.lng;
   if (typeof la !== "number" || typeof ln !== "number") return null;
-  return { name: c.name, lat: la, lng: ln, formattedAddress: c.formatted_address };
+  return {
+    name: c.name,
+    lat: la,
+    lng: ln,
+    formattedAddress: c.formatted_address,
+    placeId: c.place_id,
+    types: c.types,
+    priceLevel: typeof c.price_level === "number" && Number.isFinite(c.price_level) ? c.price_level : undefined,
+  };
 }
 
 function pickFromGoogleCandidates(
@@ -387,6 +456,8 @@ async function tryGoogleResolve(
         cands.length,
       )
     ) {
+      const details =
+        picked.result.placeId != null ? await googlePlaceDetails(picked.result.placeId, googleKey) : null;
       return {
         ...stop,
         lat: picked.result.lat,
@@ -395,6 +466,17 @@ async function tryGoogleResolve(
         locationConfidence: Math.min(1, picked.confidence),
         resolvedName: picked.result.name,
         resolvedAddress: picked.result.formattedAddress,
+        details: {
+          ...(stop.details ?? {}),
+          provider: "google",
+          placeId: picked.result.placeId,
+          types: details?.types ?? picked.result.types,
+          priceLevel: details?.price_level ?? picked.result.priceLevel,
+          openingHoursText: details?.opening_hours?.weekday_text,
+          website: details?.website ?? (details?.url && details.url.startsWith("http") ? details.url : undefined),
+          phone: details?.international_phone_number ?? details?.formatted_phone_number,
+          wheelchairAccessibleEntrance: details?.wheelchair_accessible_entrance,
+        },
       };
     }
   }
@@ -405,6 +487,7 @@ async function tryGoogleResolve(
     const sim = nameSimilarity(stop.name, c.name);
     const dKm = haversineKm(cityCenter, { lat: c.lat, lng: c.lng });
     if (sim >= GOOGLE_MIN_CONF || (dKm < 50 && sim >= 0.18)) {
+      const details = c.placeId != null ? await googlePlaceDetails(c.placeId, googleKey) : null;
       return {
         ...stop,
         lat: c.lat,
@@ -413,6 +496,17 @@ async function tryGoogleResolve(
         locationConfidence: Math.min(1, Math.max(sim, 0.4)),
         resolvedName: c.name,
         resolvedAddress: c.formattedAddress,
+        details: {
+          ...(stop.details ?? {}),
+          provider: "google",
+          placeId: c.placeId,
+          types: details?.types ?? c.types,
+          priceLevel: details?.price_level ?? c.priceLevel,
+          openingHoursText: details?.opening_hours?.weekday_text,
+          website: details?.website ?? (details?.url && details.url.startsWith("http") ? details.url : undefined),
+          phone: details?.international_phone_number ?? details?.formatted_phone_number,
+          wheelchairAccessibleEntrance: details?.wheelchair_accessible_entrance,
+        },
       };
     }
   }

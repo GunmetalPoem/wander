@@ -120,7 +120,7 @@ export function TripMap({
         ref={mapRef}
         mapboxAccessToken={mapboxToken}
         initialViewState={initialView}
-        mapStyle="mapbox://styles/mapbox/standard"
+        mapStyle="mapbox://styles/mapbox/streets-v12"
         style={{ width: "100%", height: "100%" }}
         interactiveLayerIds={[]}
         reuseMaps

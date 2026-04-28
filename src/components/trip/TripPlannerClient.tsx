@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   defaultTripForm,
   demoTripSanFrancisco,
@@ -13,6 +13,8 @@ import { scheduleDayStops } from "@/lib/trip-time";
 import { TripForm } from "./TripForm";
 import { TripTimeline } from "./TripTimeline";
 import { TripSummary } from "./TripSummary";
+import type { TripWeather } from "@/lib/weather";
+import type { TripStop } from "@/lib/trip-schema";
 
 const TripMap = dynamic(() => import("./TripMap").then((m) => m.TripMap), {
   ssr: false,
@@ -30,8 +32,15 @@ type RouteFeatureState = {
 export function TripPlannerClient() {
   const [form, setForm] = useState<TripFormInput>(defaultTripForm);
   const [plan, setPlan] = useState<TripPlan | null>(null);
+  const [weather, setWeather] = useState<TripWeather | null>(null);
   const [activeDay, setActiveDay] = useState(1);
   const [selectedStopId, setSelectedStopId] = useState<string | null>(null);
+  const [expandedStopId, setExpandedStopId] = useState<string | null>(null);
+  const [deepDetailsByStopId, setDeepDetailsByStopId] = useState<Record<string, TripStop["details"]>>({});
+  const [deepBusy, setDeepBusy] = useState(false);
+  const [deepHintByStopId, setDeepHintByStopId] = useState<Record<string, string>>({});
+  const deepDetailsRef = useRef<Record<string, TripStop["details"]>>({});
+  const deepInFlightRef = useRef<Set<string>>(new Set());
   const [routeFeature, setRouteFeature] = useState<RouteFeatureState>(null);
   const [legs, setLegs] = useState<Leg[]>([]);
   const [nearby, setNearby] = useState<{ id: string; name: string; lat: number; lng: number }[]>([]);
@@ -45,6 +54,111 @@ export function TripPlannerClient() {
     () => plan?.trip.days.find((d) => d.day === activeDay)?.stops ?? [],
     [plan, activeDay],
   );
+  const expandedStop = useMemo(
+    () => (expandedStopId ? currentStops.find((s) => s.id === expandedStopId) ?? null : null),
+    [expandedStopId, currentStops],
+  );
+  const expandedMergedDetails = useMemo(() => {
+    if (!expandedStop) return null;
+    const deep = deepDetailsByStopId[expandedStop.id];
+    if (!deep) return expandedStop.details ?? null;
+    return { ...(expandedStop.details ?? {}), ...deep };
+  }, [expandedStop, deepDetailsByStopId]);
+  const expandedDeepHint = useMemo(
+    () => (expandedStop ? deepHintByStopId[expandedStop.id] ?? null : null),
+    [expandedStop, deepHintByStopId],
+  );
+
+  useEffect(() => {
+    deepDetailsRef.current = deepDetailsByStopId;
+  }, [deepDetailsByStopId]);
+
+  const fetchDeepDetails = useCallback(
+    async (stop: TripStop) => {
+      const website = stop.details?.website ?? null;
+      const ticketingUrl = stop.details?.ticketingUrl ?? null;
+      const placeId = stop.details?.placeId ?? null;
+      if (!website && !ticketingUrl && !placeId) return;
+      const existing = deepDetailsRef.current[stop.id];
+      if (existing?.menuHighlights?.length || existing?.admission || existing?.fees || existing?.ticketingUrl) return;
+      if (deepInFlightRef.current.has(stop.id)) return;
+      deepInFlightRef.current.add(stop.id);
+      const res = await fetch("/api/trip/stop-details", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          stop: {
+            name: stop.name,
+            address: stop.address,
+            category: stop.category,
+            website,
+            ticketingUrl,
+            placeId,
+          },
+        }),
+      });
+      try {
+        if (!res.ok) return;
+        const data = (await res.json()) as { details?: TripStop["details"]; hint?: string };
+        if (typeof data.hint === "string" && data.hint.trim()) {
+          setDeepHintByStopId((prev) => ({ ...prev, [stop.id]: data.hint!.trim() }));
+        }
+        if (data.details) {
+          setDeepDetailsByStopId((prev) => ({ ...prev, [stop.id]: data.details }));
+        }
+      } finally {
+        deepInFlightRef.current.delete(stop.id);
+      }
+    },
+    [],
+  );
+
+  // Prefetch deep details in the background so expand feels instant.
+  useEffect(() => {
+    if (!plan) return;
+    const stopsToPrefetch = currentStops.slice(0, 6);
+    let cancelled = false;
+    (async () => {
+      // small concurrency to keep UI snappy and avoid hammering sources
+      const queue = stopsToPrefetch.filter((s) => s.details?.website || s.details?.ticketingUrl || s.details?.placeId);
+      const workers = 2;
+      const next = async () => {
+        while (!cancelled) {
+          const s = queue.shift();
+          if (!s) return;
+          try {
+            await fetchDeepDetails(s);
+          } catch {
+            // ignore
+          }
+        }
+      };
+      await Promise.all(Array.from({ length: workers }, () => next()));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [plan, activeDay, currentStops, fetchDeepDetails]);
+
+  useEffect(() => {
+    if (!expandedStop || !plan) return;
+    const existing = deepDetailsRef.current[expandedStop.id];
+    if (existing?.menuHighlights?.length || existing?.admission || existing?.fees || existing?.ticketingUrl) return;
+    const website = expandedStop.details?.website ?? null;
+    if (!website) return;
+    let cancelled = false;
+    setDeepBusy(true);
+    (async () => {
+      try {
+        await fetchDeepDetails(expandedStop);
+      } finally {
+        if (!cancelled) setDeepBusy(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [expandedStop, plan, fetchDeepDetails]);
 
   const legSeconds = useMemo(() => legs.map((l) => l.durationSeconds), [legs]);
   const scheduled = useMemo(
@@ -123,7 +237,9 @@ export function TripPlannerClient() {
     let cancelled = false;
     (async () => {
       const res = await fetch(
-        `/api/trip/nearby?lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}&type=lunch`,
+        `/api/trip/nearby?lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}&type=${
+          form.accessibility.restStops ? "bathroom" : "lunch"
+        }`,
       );
       if (!res.ok || cancelled) return;
       const data = (await res.json()) as {
@@ -135,7 +251,7 @@ export function TripPlannerClient() {
     return () => {
       cancelled = true;
     };
-  }, [selectedStopId, plan, currentStops]);
+  }, [selectedStopId, plan, currentStops, form.accessibility.restStops]);
 
   const onSubmit = useCallback(async () => {
     setErr(null);
@@ -149,20 +265,23 @@ export function TripPlannerClient() {
           cityCenter: form.cityCenter,
           days: form.days,
           groupSize: form.groupSize,
-          budget: form.budget,
+          budgetAmount: form.budgetAmount,
           pace: form.pace,
           vibes: form.vibes,
           mustInclude: form.mustInclude,
           transport: form.transport,
+          tripDate: form.tripDate || null,
+          accessibility: form.accessibility,
         }),
       });
-      const data = (await res.json()) as { error?: string; plan?: TripPlan };
+      const data = (await res.json()) as { error?: string; plan?: TripPlan; weather?: TripWeather | null };
       if (!res.ok) {
         setErr(data.error ?? "Plan failed");
         return;
       }
       if (data.plan) {
         setPlan(data.plan);
+        setWeather(data.weather ?? null);
         setActiveDay(1);
         setSelectedStopId(data.plan.trip.days[0]?.stops[0]?.id ?? null);
       }
@@ -182,8 +301,10 @@ export function TripPlannerClient() {
       cityLocationReady: true,
     });
     setPlan(demoTripSanFrancisco);
+    setWeather(null);
     setActiveDay(1);
     setSelectedStopId(demoTripSanFrancisco.trip.days[0]!.stops[0]!.id);
+    setExpandedStopId(null);
   }, [form]);
 
   const onReorder = useCallback(
@@ -216,6 +337,7 @@ export function TripPlannerClient() {
           <>
             <TripSummary
               plan={plan}
+              weather={weather}
               activeDay={activeDay}
               totalWalkMinutes={totalWalkMinutes}
               totalDistanceKm={totalDistanceKm}
@@ -230,6 +352,7 @@ export function TripPlannerClient() {
               onReorder={onReorder}
               selectedStopId={selectedStopId}
               onSelectStop={setSelectedStopId}
+              onExpandStop={setExpandedStopId}
             />
             <div className="flex flex-wrap gap-2 border-t border-white/5 pt-2">
               <button
@@ -243,7 +366,8 @@ export function TripPlannerClient() {
               </button>
               {selectedStopId && (
                 <span className="text-[10px] text-parchment/50">
-                  Blue dots: nearby places (search). Pick a stop on the map or list.
+                  Blue dots: nearby {form.accessibility.restStops ? "rest stops (bathrooms)" : "places (search)"}.
+                  Pick a stop on the map or list.
                 </span>
               )}
             </div>
@@ -274,6 +398,155 @@ export function TripPlannerClient() {
           </div>
         )}
       </section>
+      {plan && expandedStop && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setExpandedStopId(null)}
+        >
+          <div
+            className="w-full max-w-2xl rounded-2xl border border-white/10 bg-[#0b0b0b] p-4 text-parchment/90 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-[10px] uppercase tracking-widest text-parchment/50">Stop details</p>
+                <h3 className="mt-1 text-xl font-serif text-parchment">{expandedStop.name}</h3>
+                <p className="mt-1 text-sm text-parchment/60">{expandedStop.address}</p>
+              </div>
+              <button
+                type="button"
+                className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-parchment/80 hover:bg-white/10"
+                onClick={() => setExpandedStopId(null)}
+              >
+                Collapse
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-3 text-sm">
+              {expandedStop.description?.trim() && (
+                <div className="rounded-xl border border-white/10 bg-black/30 p-3">
+                  <p className="text-[10px] uppercase tracking-widest text-parchment/50">Why go</p>
+                  <p className="mt-1 text-parchment/80">{expandedStop.description}</p>
+                </div>
+              )}
+
+              {deepBusy && (
+                <div className="rounded-xl border border-white/10 bg-black/30 p-3 text-xs text-parchment/60">
+                  Fetching more details (hours, fees, menu highlights)…
+                </div>
+              )}
+              {!deepBusy && expandedDeepHint && (
+                <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 text-xs text-amber-100/80">
+                  {expandedDeepHint}
+                </div>
+              )}
+
+              {expandedMergedDetails && (
+                <div className="rounded-xl border border-white/10 bg-black/30 p-3">
+                  <p className="text-[10px] uppercase tracking-widest text-parchment/50">Extra info</p>
+                  <div className="mt-2 space-y-1 text-parchment/80">
+                    {expandedMergedDetails.cuisine && (
+                      <p>
+                        <span className="text-parchment/50">Cuisine:</span> {expandedMergedDetails.cuisine}
+                      </p>
+                    )}
+                    {expandedMergedDetails.openingHoursText?.length ? (
+                      <div>
+                        <p className="text-parchment/50">Hours:</p>
+                        <ul className="mt-1 list-disc space-y-0.5 pl-5">
+                          {expandedMergedDetails.openingHoursText.map((t) => (
+                            <li key={t}>{t}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+                    {expandedMergedDetails.admission && (
+                      <div>
+                        <p className="text-parchment/50">Admission:</p>
+                        <ul className="mt-1 list-disc space-y-0.5 pl-5">
+                          {expandedMergedDetails.admission.summary && <li>{expandedMergedDetails.admission.summary}</li>}
+                          {expandedMergedDetails.admission.member && <li>Member: {expandedMergedDetails.admission.member}</li>}
+                          {expandedMergedDetails.admission.adult && <li>Adult: {expandedMergedDetails.admission.adult}</li>}
+                          {expandedMergedDetails.admission.student && <li>Student: {expandedMergedDetails.admission.student}</li>}
+                          {expandedMergedDetails.admission.teen && <li>Teen: {expandedMergedDetails.admission.teen}</li>}
+                          {expandedMergedDetails.admission.child && <li>Child: {expandedMergedDetails.admission.child}</li>}
+                          {expandedMergedDetails.admission.senior && <li>Senior: {expandedMergedDetails.admission.senior}</li>}
+                          {expandedMergedDetails.admission.freeDays && <li>Free days: {expandedMergedDetails.admission.freeDays}</li>}
+                        </ul>
+                      </div>
+                    )}
+                    {expandedMergedDetails.fees && (
+                      <div>
+                        <p className="text-parchment/50">Fees / permits:</p>
+                        <ul className="mt-1 list-disc space-y-0.5 pl-5">
+                          {expandedMergedDetails.fees.entry && <li>Entry: {expandedMergedDetails.fees.entry}</li>}
+                          {expandedMergedDetails.fees.parking && <li>Parking: {expandedMergedDetails.fees.parking}</li>}
+                          {expandedMergedDetails.fees.permit && <li>Permit: {expandedMergedDetails.fees.permit}</li>}
+                        </ul>
+                      </div>
+                    )}
+                    {expandedMergedDetails.menuHighlights?.length ? (
+                      <div>
+                        <p className="text-parchment/50">Menu highlights:</p>
+                        <ul className="mt-1 list-disc space-y-0.5 pl-5">
+                          {expandedMergedDetails.menuHighlights.slice(0, 10).map((t) => (
+                            <li key={t}>{t}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+                    {expandedMergedDetails.ticketingUrl && (
+                      <p className="break-words">
+                        <span className="text-parchment/50">Tickets:</span>{" "}
+                        <a
+                          className="text-ember/90 hover:underline"
+                          href={expandedMergedDetails.ticketingUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          {expandedMergedDetails.ticketingUrl}
+                        </a>
+                      </p>
+                    )}
+                    {expandedMergedDetails.wheelchairAccessibleEntrance != null && (
+                      <p>
+                        <span className="text-parchment/50">Wheelchair entrance:</span>{" "}
+                        {expandedMergedDetails.wheelchairAccessibleEntrance ? "Yes" : "No / unknown"}
+                      </p>
+                    )}
+                    {expandedMergedDetails.website && (
+                      <p className="break-words">
+                        <span className="text-parchment/50">Website:</span>{" "}
+                        <a
+                          className="text-ember/90 hover:underline"
+                          href={expandedMergedDetails.website}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          {expandedMergedDetails.website}
+                        </a>
+                      </p>
+                    )}
+                    {expandedMergedDetails.phone && (
+                      <p>
+                        <span className="text-parchment/50">Phone:</span> {expandedMergedDetails.phone}
+                      </p>
+                    )}
+                    {expandedMergedDetails.provider && (
+                      <p className="text-[11px] text-parchment/40">
+                        Source: {expandedMergedDetails.provider.toUpperCase()}
+                        {expandedMergedDetails.deepSourceUrl ? ` · Deep: ${expandedMergedDetails.deepSourceUrl}` : ""}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

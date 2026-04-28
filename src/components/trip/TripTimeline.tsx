@@ -42,6 +42,7 @@ type Props = {
   onReorder: (reordered: TripStop[]) => void;
   selectedStopId: string | null;
   onSelectStop: (id: string) => void;
+  onExpandStop: (id: string) => void;
 };
 
 export function TripTimeline({
@@ -52,6 +53,7 @@ export function TripTimeline({
   onReorder,
   selectedStopId,
   onSelectStop,
+  onExpandStop,
 }: Props) {
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -122,7 +124,23 @@ export function TripTimeline({
                         >
                           {row.stop.name}
                         </button>
+                        <div className="mt-1 flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => onExpandStop(row.stop.id)}
+                            className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-[10px] text-parchment/80 hover:bg-white/10"
+                          >
+                            Expand
+                          </button>
+                        </div>
                         <p className="line-clamp-2 text-xs text-parchment/55">{row.stop.address}</p>
+                        {(row.stop.details?.cuisine || row.stop.details?.openingHoursText?.length) && (
+                          <p className="mt-0.5 line-clamp-1 text-[10px] text-parchment/45">
+                            {row.stop.details?.cuisine ? `Cuisine: ${row.stop.details.cuisine}` : ""}
+                            {row.stop.details?.cuisine && row.stop.details?.openingHoursText?.length ? " · " : ""}
+                            {row.stop.details?.openingHoursText?.length ? row.stop.details.openingHoursText[0] : ""}
+                          </p>
+                        )}
                         {!(
                           row.stop.lat != null &&
                           row.stop.lng != null &&

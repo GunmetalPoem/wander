@@ -1,6 +1,6 @@
 "use client";
 
-import { budgetOptions, defaultTripForm, paceOptions, vibeOptions, type TripFormInput } from "@/lib/trip-schema";
+import { defaultTripForm, paceOptions, vibeOptions, type TripFormInput } from "@/lib/trip-schema";
 import { CityConfirmField } from "./CityConfirmField";
 
 type Props = {
@@ -43,18 +43,19 @@ export function TripForm({ value, onChange, onSubmit, onLoadDemo, busy }: Props)
       </div>
       <div className="grid grid-cols-2 gap-2">
         <div>
-          <label className="text-xs text-parchment/50">Budget</label>
-          <select
-            className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-2 py-2 text-parchment"
-            value={value.budget}
-            onChange={(e) => onChange({ ...value, budget: e.target.value as TripFormInput["budget"] })}
-          >
-            {budgetOptions.map((b) => (
-              <option key={b} value={b}>
-                {b}
-              </option>
-            ))}
-          </select>
+          <label className="text-xs text-parchment/50">Budget (per day)</label>
+          <input
+            type="number"
+            min={0}
+            max={100000}
+            step={10}
+            inputMode="decimal"
+            className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-parchment"
+            value={Number.isFinite(value.budgetAmount) ? value.budgetAmount : 0}
+            onChange={(e) =>
+              onChange({ ...value, budgetAmount: Math.max(0, Math.min(100000, Number(e.target.value) || 0)) })
+            }
+          />
         </div>
         <div>
           <label className="text-xs text-parchment/50">Pace</label>
@@ -69,6 +70,43 @@ export function TripForm({ value, onChange, onSubmit, onLoadDemo, busy }: Props)
               </option>
             ))}
           </select>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className="text-xs text-parchment/50">Trip date (optional)</label>
+          <input
+            type="date"
+            className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-parchment"
+            value={value.tripDate}
+            onChange={(e) => onChange({ ...value, tripDate: e.target.value })}
+          />
+        </div>
+        <div>
+          <label className="text-xs text-parchment/50">Accessibility</label>
+          <div className="mt-2 space-y-2 rounded-lg border border-white/10 bg-black/20 p-2">
+            {(
+              [
+                ["wheelchair", "Wheelchair-friendly"],
+                ["lowWalking", "Low walking distance"],
+                ["restStops", "Rest stops (bathrooms/benches)"],
+              ] as const
+            ).map(([k, label]) => (
+              <label key={k} className="flex cursor-pointer items-center gap-2 text-xs text-parchment/80">
+                <input
+                  type="checkbox"
+                  checked={value.accessibility[k]}
+                  onChange={(e) =>
+                    onChange({
+                      ...value,
+                      accessibility: { ...value.accessibility, [k]: e.target.checked },
+                    })
+                  }
+                />
+                <span>{label}</span>
+              </label>
+            ))}
+          </div>
         </div>
       </div>
       <div>

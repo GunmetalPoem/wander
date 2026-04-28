@@ -262,6 +262,41 @@ const StopSchema = z.object({
   locationConfidence: z.number().min(0).max(1).optional(),
   resolvedName: z.string().optional(),
   resolvedAddress: z.string().optional(),
+  details: z
+    .object({
+      provider: z.enum(["google", "osm"]).optional(),
+      placeId: z.string().optional(),
+      types: z.array(z.string()).optional(),
+      cuisine: z.string().optional(),
+      openingHoursText: z.array(z.string()).optional(),
+      website: z.string().url().optional(),
+      deepSourceUrl: z.string().url().optional(),
+      phone: z.string().optional(),
+      priceLevel: z.number().int().min(0).max(4).optional(),
+      wheelchairAccessibleEntrance: z.boolean().optional(),
+      admission: z
+        .object({
+          summary: z.string().optional(),
+          member: z.string().optional(),
+          adult: z.string().optional(),
+          student: z.string().optional(),
+          child: z.string().optional(),
+          teen: z.string().optional(),
+          senior: z.string().optional(),
+          freeDays: z.string().optional(),
+        })
+        .optional(),
+      fees: z
+        .object({
+          parking: z.string().optional(),
+          permit: z.string().optional(),
+          entry: z.string().optional(),
+        })
+        .optional(),
+      menuHighlights: z.array(z.string()).optional(),
+      ticketingUrl: z.string().url().optional(),
+    })
+    .optional(),
 });
 
 const DaySchema = z.object({
@@ -295,11 +330,19 @@ export type TripFormInput = {
   cityLocationReady: boolean;
   days: number;
   groupSize: number;
-  budget: (typeof budgetOptions)[number];
+  /** Per-day budget in user's local currency (treated as USD in prompts/UI for now). */
+  budgetAmount: number;
   pace: (typeof paceOptions)[number];
   vibes: (typeof vibeOptions)[number][];
   mustInclude: string;
   transport: "walking" | "driving";
+  /** Optional trip start date (YYYY-MM-DD) used for weather-aware planning. */
+  tripDate: string;
+  accessibility: {
+    wheelchair: boolean;
+    lowWalking: boolean;
+    restStops: boolean;
+  };
 };
 
 export const defaultTripForm: TripFormInput = {
@@ -309,11 +352,17 @@ export const defaultTripForm: TripFormInput = {
   cityLocationReady: false,
   days: 1,
   groupSize: 2,
-  budget: "mid",
+  budgetAmount: 180,
   pace: "balanced",
   vibes: ["foodie", "outdoors"],
   mustInclude: "",
   transport: "walking",
+  tripDate: "",
+  accessibility: {
+    wheelchair: false,
+    lowWalking: false,
+    restStops: false,
+  },
 };
 
 /** Hardcoded demo for map / UI tests without AI. */

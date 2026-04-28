@@ -8,6 +8,8 @@ import {
   normalizeTripJsonPayload,
 } from "@/lib/trip-schema";
 import { getGoogleGeoKeyFromEnv, refineTripPlanWithMapbox } from "@/lib/trip-geocode";
+import { enrichTripPlan } from "@/lib/trip-enrich";
+import { fetchTripWeather } from "@/lib/weather";
 import { z } from "zod";
 
 export const maxDuration = 120;
@@ -16,12 +18,20 @@ const RequestBodySchema = z.object({
   city: z.string().min(1).max(200),
   days: z.number().int().min(1).max(14).optional(),
   groupSize: z.number().int().min(1).max(50).optional(),
-  budget: z.enum(["budget", "mid", "splurge"]).optional(),
+  budgetAmount: z.number().min(0).max(100000).optional(),
   pace: z.enum(["packed", "balanced", "relaxed"]).optional(),
   vibes: z.array(z.string()).optional(),
   mustInclude: z.string().max(2000).optional(),
   transport: z.enum(["walking", "driving"]).optional(),
   cityCenter: z.object({ lat: z.number(), lng: z.number() }).nullish(),
+  tripDate: z.string().nullish(),
+  accessibility: z
+    .object({
+      wheelchair: z.boolean().optional(),
+      lowWalking: z.boolean().optional(),
+      restStops: z.boolean().optional(),
+    })
+    .optional(),
 });
 
 const SYSTEM = `You are a travel planner API. You output ONLY valid JSON (no markdown fences) matching this structure:
@@ -63,6 +73,13 @@ Rules:
 - "travel_minutes_to_next" is your estimate; it may be refined with routing later.
 - If the city is ambiguous, pick the well-known one (e.g. "SF" = San Francisco, USA).`;
 
+function budgetTierFromAmount(amt: number): "budget" | "mid" | "splurge" {
+  if (!Number.isFinite(amt) || amt <= 0) return "mid";
+  if (amt < 120) return "budget";
+  if (amt < 260) return "mid";
+  return "splurge";
+}
+
 export async function POST(req: Request) {
   let body: unknown;
   try {
@@ -75,24 +92,44 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid request", details: parsed.error.flatten() }, { status: 400 });
   }
   const b = parsed.data;
+  const budgetAmount = b.budgetAmount ?? defaultTripForm.budgetAmount;
+  const accessibility = {
+    wheelchair: Boolean(b.accessibility?.wheelchair ?? defaultTripForm.accessibility.wheelchair),
+    lowWalking: Boolean(b.accessibility?.lowWalking ?? defaultTripForm.accessibility.lowWalking),
+    restStops: Boolean(b.accessibility?.restStops ?? defaultTripForm.accessibility.restStops),
+  };
   const input: TripFormInput = {
     city: b.city,
     cityCenter: b.cityCenter ?? null,
     cityLocationReady: true,
     days: b.days ?? defaultTripForm.days,
     groupSize: b.groupSize ?? defaultTripForm.groupSize,
-    budget: b.budget ?? defaultTripForm.budget,
+    budgetAmount,
     pace: b.pace ?? defaultTripForm.pace,
     vibes: (b.vibes as TripFormInput["vibes"])?.length
       ? (b.vibes as TripFormInput["vibes"])
       : defaultTripForm.vibes,
     mustInclude: b.mustInclude?.trim() ?? "",
     transport: b.transport ?? defaultTripForm.transport,
+    tripDate: (b.tripDate ?? defaultTripForm.tripDate) || "",
+    accessibility,
   };
 
+  const budgetTier = budgetTierFromAmount(input.budgetAmount);
+  const accessibilityLines = [
+    input.accessibility.wheelchair ? "- Prioritize wheelchair-accessible venues and routes; avoid stairs-only viewpoints." : null,
+    input.accessibility.lowWalking
+      ? "- Keep walking distances low: cluster stops tightly; prefer short transfers; reduce stop count if needed."
+      : null,
+    input.accessibility.restStops ? "- Include frequent rest stops (cafes/parks/benches) and easy bathroom access." : null,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
   const userPrompt = `Plan a ${input.days}-day trip in ${input.city}.
-Group size: ${input.groupSize}. Budget: ${input.budget}. Pace: ${input.pace}. Transport between stops: ${input.transport}.
+Group size: ${input.groupSize}. Budget: about $${Math.round(input.budgetAmount)}/day (${budgetTier}). Pace: ${input.pace}. Transport between stops: ${input.transport}.
 Interests: ${input.vibes.join(", ")}.
+${input.tripDate ? `Trip date (start): ${input.tripDate} (use it for weather-aware choices).\n` : ""}${accessibilityLines ? `Accessibility preferences:\n${accessibilityLines}\n` : ""}
 ${input.mustInclude ? `Must include or work in: ${input.mustInclude}\n` : ""}
 Return the JSON object only.`;
 
@@ -176,5 +213,19 @@ Return the JSON object only.`;
     }
   }
 
-  return NextResponse.json({ plan, provider: anthropicKey ? "anthropic" : "openai" });
+  // Enrich with cuisine/opening_hours/etc when possible (best-effort).
+  try {
+    plan = await enrichTripPlan(plan);
+  } catch {
+    // ignore
+  }
+
+  const cc = plan.trip.city_center;
+  const weather = await fetchTripWeather(cc?.lat, cc?.lng, input.tripDate || null);
+
+  return NextResponse.json({
+    plan,
+    provider: anthropicKey ? "anthropic" : "openai",
+    weather,
+  });
 }
