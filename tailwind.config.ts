@@ -9,15 +9,27 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        serif: ["var(--font-literata)", "Georgia", "serif"],
-        sans: ["var(--font-dm-sans)", "system-ui", "sans-serif"],
+        /** Momo Trust Display — page titles, hero lines, quest headers */
+        serif: ['"Momo Trust Display"', "ui-sans-serif", "sans-serif"],
+        /** SUSE — body copy, labels, controls */
+        sans: ['"SUSE"', "ui-sans-serif", "system-ui", "sans-serif"],
       },
       colors: {
-        ink: "#0f1419",
-        parchment: "#f4efe4",
-        ember: "#c45c26",
+        ink: "#030306",
+        parchment: "#e8e8ec",
+        ember: "#d4652a",
         moss: "#2d5a4a",
-        dusk: "#1a2433",
+        /** Legacy token — deep blue-gray; prefer void/coal for new UI */
+        dusk: "#0a0a0f",
+        /** Near-black surfaces */
+        void: "#030303",
+        coal: "#0a0a0c",
+        mist: "#9a9aa3",
+        /** Accent for chat / active states (reference: subtle neon on dark). */
+        wander: {
+          DEFAULT: "#34d399",
+          muted: "rgba(52, 211, 153, 0.12)",
+        },
       },
     },
   },

@@ -4,6 +4,7 @@
   "private": true,
   "description": "Wander — AI trip planner (Mapbox) and hyperlocal quest discovery (Lab + /lore feed).",
   "scripts": {
+    "clean": "rm -rf .next",
     "dev": "next dev",
     "dev:turbo": "node -e \"console.error('\\n[Wander] Trip planner uses mapbox-gl; Turbopack often hits module-not-found on /. Use: npm run dev (no --turbo).\\n')\" && next dev --turbo",
     "dev:poll": "WATCHPACK_POLLING=true next dev",

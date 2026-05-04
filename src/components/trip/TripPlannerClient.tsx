@@ -8,11 +8,14 @@ import {
   type TripFormInput,
   type TripPlan,
 } from "@/lib/trip-schema";
+import { applyLastUserMessageTweaks, mergeTripChatPatch, type TripChatPatch } from "@/lib/trip-chat-merge";
 import { replaceDayStops } from "@/lib/trip-mutate";
-import { scheduleDayStops } from "@/lib/trip-time";
+import { scheduleDayStops, suggestedDayStartMinutes } from "@/lib/trip-time";
 import { TripForm } from "./TripForm";
 import { TripTimeline } from "./TripTimeline";
 import { TripSummary } from "./TripSummary";
+import { CityConfirmField } from "./CityConfirmField";
+import { TripChatPanel, type TripChatMessage } from "./TripChatPanel";
 import type { TripWeather } from "@/lib/weather";
 import type { TripStop } from "@/lib/trip-schema";
 
@@ -29,8 +32,57 @@ type RouteFeatureState = {
   geometry: { type: "LineString"; coordinates: [number, number][] };
 } | null;
 
+function TripPlanningLoadingView({ cityLabel }: { cityLabel: string }) {
+  return (
+    <div className="flex w-full max-w-[1600px] flex-col gap-3 lg:h-[calc(100vh-5.5rem)] lg:flex-row lg:gap-4">
+      <section className="relative order-1 flex min-h-[min(72vh,680px)] w-full flex-1 overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-coal via-void to-black lg:order-2 lg:min-h-[calc(100vh-6rem)]">
+        <div className="pointer-events-none absolute inset-0 opacity-[0.07] [background-image:radial-gradient(circle_at_30%_20%,rgba(52,211,153,0.35),transparent_45%),radial-gradient(circle_at_80%_60%,rgba(255,255,255,0.12),transparent_40%)]" />
+        <div className="relative flex h-full min-h-[inherit] flex-col items-center justify-center gap-6 px-6 text-center">
+          <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] shadow-lg shadow-black/40">
+            <div className="h-9 w-9 animate-spin rounded-full border-2 border-wander/25 border-t-wander" aria-hidden />
+          </div>
+          <div>
+            <p className="font-serif text-2xl tracking-tight text-parchment sm:text-3xl">Building your itinerary</p>
+            <p className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-parchment/55">
+              Laying out your days and stops on the map
+              {cityLabel ? (
+                <>
+                  {" "}
+                  for <span className="text-parchment/80">{cityLabel}</span>
+                </>
+              ) : null}
+              …
+            </p>
+          </div>
+          <p className="text-[11px] text-parchment/35">This usually takes a few seconds.</p>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+const WELCOME_MESSAGES: TripChatMessage[] = [
+  {
+    id: "welcome",
+    role: "assistant",
+    content:
+      "I'm Wander. Tell me where you're going, how long you'll be there, and what you like to do — food, museums, outdoors, pace, budget, and so on. When the trip is clear enough I'll refresh the map automatically; you can also tap Build itinerary or Update trip next to Send. New trip clears everything and starts over.",
+  },
+];
+
 export function TripPlannerClient() {
   const [form, setForm] = useState<TripFormInput>(defaultTripForm);
+  const formRef = useRef(form);
+  formRef.current = form;
+  const [chatMessages, setChatMessages] = useState<TripChatMessage[]>(WELCOME_MESSAGES);
+  const chatMsgsRef = useRef(chatMessages);
+  chatMsgsRef.current = chatMessages;
+  const [chatBusy, setChatBusy] = useState(false);
+  /** Model asked to plan but city must be confirmed first — then we prompt for Build. */
+  const [awaitingCityForPlan, setAwaitingCityForPlan] = useState(false);
+  /** Model signaled enough detail — highlight Build itinerary (user still taps to generate). */
+  const [itinerarySuggested, setItinerarySuggested] = useState(false);
+  const [manualFieldsOpen, setManualFieldsOpen] = useState(false);
   const [plan, setPlan] = useState<TripPlan | null>(null);
   const [weather, setWeather] = useState<TripWeather | null>(null);
   const [activeDay, setActiveDay] = useState(1);
@@ -161,9 +213,10 @@ export function TripPlannerClient() {
   }, [expandedStop, plan, fetchDeepDetails]);
 
   const legSeconds = useMemo(() => legs.map((l) => l.durationSeconds), [legs]);
+  const dayStart = useMemo(() => suggestedDayStartMinutes(currentStops), [currentStops]);
   const scheduled = useMemo(
-    () => scheduleDayStops(currentStops, legSeconds, 9, 0),
-    [currentStops, legSeconds],
+    () => scheduleDayStops(currentStops, legSeconds, dayStart.hour, dayStart.minute),
+    [currentStops, legSeconds, dayStart.hour, dayStart.minute],
   );
 
   const totalDistanceKm = useMemo(
@@ -253,7 +306,7 @@ export function TripPlannerClient() {
     };
   }, [selectedStopId, plan, currentStops, form.accessibility.restStops]);
 
-  const onSubmit = useCallback(async () => {
+  const runPlanFromForm = useCallback(async (f: TripFormInput) => {
     setErr(null);
     setBusy(true);
     try {
@@ -261,17 +314,17 @@ export function TripPlannerClient() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          city: form.city,
-          cityCenter: form.cityCenter,
-          days: form.days,
-          groupSize: form.groupSize,
-          budgetAmount: form.budgetAmount,
-          pace: form.pace,
-          vibes: form.vibes,
-          mustInclude: form.mustInclude,
-          transport: form.transport,
-          tripDate: form.tripDate || null,
-          accessibility: form.accessibility,
+          city: f.city,
+          cityCenter: f.cityCenter,
+          days: f.days,
+          groupSize: f.groupSize,
+          budgetAmount: f.budgetAmount,
+          pace: f.pace,
+          vibes: f.vibes,
+          mustInclude: f.mustInclude,
+          transport: f.transport,
+          tripDate: f.tripDate || null,
+          accessibility: f.accessibility,
         }),
       });
       const data = (await res.json()) as { error?: string; plan?: TripPlan; weather?: TripWeather | null };
@@ -284,18 +337,162 @@ export function TripPlannerClient() {
         setWeather(data.weather ?? null);
         setActiveDay(1);
         setSelectedStopId(data.plan.trip.days[0]?.stops[0]?.id ?? null);
+        setItinerarySuggested(false);
+        setAwaitingCityForPlan(false);
       }
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Request failed");
     } finally {
       setBusy(false);
     }
-  }, [form]);
+  }, []);
+
+  const buildItinerary = useCallback(() => {
+    setItinerarySuggested(false);
+    setAwaitingCityForPlan(false);
+    void runPlanFromForm(formRef.current);
+  }, [runPlanFromForm]);
+
+  const onSubmit = useCallback(() => {
+    buildItinerary();
+  }, [buildItinerary]);
+
+  useEffect(() => {
+    if (!awaitingCityForPlan || plan) return;
+    if (!form.cityLocationReady) return;
+    setAwaitingCityForPlan(false);
+    setItinerarySuggested(true);
+  }, [awaitingCityForPlan, form.cityLocationReady, plan]);
+
+  useEffect(() => {
+    if (!manualFieldsOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setManualFieldsOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [manualFieldsOpen]);
+
+  const handleChatSend = useCallback(
+    async (text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed) return;
+
+      const isExplicitBuildCmd =
+        /^(build my (itinerary|trip|map)|generate (the )?(itinerary|plan)|show (me )?(my )?(the )?(map|itinerary|trip|plan)|create (the )?(itinerary|plan)|draw (the )?(map|itinerary))\s*\.?$/i.test(
+          trimmed,
+        ) || /^go ahead (and )?(build|plan|generate)\s*\.?$/i.test(trimmed);
+
+      if (
+        isExplicitBuildCmd &&
+        formRef.current.cityLocationReady &&
+        formRef.current.city.trim().length > 1
+      ) {
+        const userMsg: TripChatMessage = { id: crypto.randomUUID(), role: "user", content: trimmed };
+        chatMsgsRef.current = [...chatMsgsRef.current, userMsg];
+        setChatMessages([...chatMsgsRef.current]);
+        await buildItinerary();
+        return;
+      }
+
+      if (!isExplicitBuildCmd) {
+        setItinerarySuggested(false);
+      }
+
+      const userMsg: TripChatMessage = { id: crypto.randomUUID(), role: "user", content: trimmed };
+      const nextHistory = [...chatMsgsRef.current, userMsg];
+      chatMsgsRef.current = nextHistory;
+      setChatMessages(nextHistory);
+      setChatBusy(true);
+      setErr(null);
+      try {
+        const res = await fetch("/api/trip/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            messages: nextHistory.map(({ role, content }) => ({ role, content })),
+            draft: formRef.current,
+            hasExistingPlan: Boolean(plan),
+          }),
+        });
+        const data = (await res.json()) as {
+          error?: string;
+          reply?: string;
+          readyToPlan?: boolean;
+          planWhenCityReady?: boolean;
+          patch?: TripChatPatch;
+        };
+        if (!res.ok) {
+          setErr(data.error ?? "Chat failed");
+          if (typeof data.reply === "string" && data.reply.trim()) {
+            const asst: TripChatMessage = {
+              id: crypto.randomUUID(),
+              role: "assistant",
+              content: data.reply.trim(),
+            };
+            chatMsgsRef.current = [...chatMsgsRef.current, asst];
+            setChatMessages([...chatMsgsRef.current]);
+          }
+          return;
+        }
+        const merged = applyLastUserMessageTweaks(trimmed, mergeTripChatPatch(formRef.current, data.patch));
+        setForm(merged);
+        if (typeof data.reply === "string" && data.reply.trim()) {
+          const asst: TripChatMessage = {
+            id: crypto.randomUUID(),
+            role: "assistant",
+            content: data.reply.trim(),
+          };
+          chatMsgsRef.current = [...chatMsgsRef.current, asst];
+          setChatMessages([...chatMsgsRef.current]);
+        }
+
+        if (data.readyToPlan === true || data.planWhenCityReady === true) {
+          setItinerarySuggested(true);
+        }
+        if ((data.planWhenCityReady === true || data.readyToPlan === true) && !merged.cityLocationReady) {
+          setAwaitingCityForPlan(true);
+        } else {
+          setAwaitingCityForPlan(false);
+        }
+
+        if ((data.readyToPlan === true || data.planWhenCityReady === true) && merged.cityLocationReady) {
+          await runPlanFromForm(merged);
+        }
+      } catch (e) {
+        setErr(e instanceof Error ? e.message : "Request failed");
+      } finally {
+        setChatBusy(false);
+      }
+    },
+    [runPlanFromForm, plan, buildItinerary],
+  );
+
+  const startFreshTrip = useCallback(() => {
+    setPlan(null);
+    setWeather(null);
+    setRouteFeature(null);
+    setLegs([]);
+    setNearby([]);
+    setErr(null);
+    setItinerarySuggested(false);
+    setAwaitingCityForPlan(false);
+    setForm(defaultTripForm);
+    setActiveDay(1);
+    setSelectedStopId(null);
+    setExpandedStopId(null);
+    setDeepDetailsByStopId({});
+    setDeepHintByStopId({});
+    chatMsgsRef.current = [...WELCOME_MESSAGES];
+    setChatMessages([...WELCOME_MESSAGES]);
+  }, []);
 
   const onLoadDemo = useCallback(() => {
     setErr(null);
+    setItinerarySuggested(false);
+    setAwaitingCityForPlan(false);
     setForm({
-      ...form,
+      ...formRef.current,
       city: "San Francisco, California, United States",
       cityCenter: { lat: 37.7749, lng: -122.4194 },
       cityLocationReady: true,
@@ -305,7 +502,15 @@ export function TripPlannerClient() {
     setActiveDay(1);
     setSelectedStopId(demoTripSanFrancisco.trip.days[0]!.stops[0]!.id);
     setExpandedStopId(null);
-  }, [form]);
+    const note: TripChatMessage = {
+      id: crypto.randomUUID(),
+      role: "assistant",
+      content:
+        "Loaded the San Francisco demo — your map and timeline are on the right. You can still chat here to practice the flow.",
+    };
+    chatMsgsRef.current = [...chatMsgsRef.current, note];
+    setChatMessages([...chatMsgsRef.current]);
+  }, []);
 
   const onReorder = useCallback(
     (reordered: (typeof currentStops)[number][]) => {
@@ -320,19 +525,126 @@ export function TripPlannerClient() {
     [nearby],
   );
 
+  const buildLabel = plan ? "Update trip" : "Build itinerary";
+  const buildDisabled = (!plan && !form.cityLocationReady) || busy || chatBusy;
+  const buildHighlighted = itinerarySuggested && !busy;
+
+  const showPlanProgressShell = busy && !plan;
+
   return (
-    <div className="flex w-full max-w-[1600px] flex-col gap-3 lg:h-[calc(100vh-5.5rem)] lg:flex-row lg:gap-4">
-      <section className="order-2 flex min-h-0 w-full flex-col gap-2 overflow-y-auto overflow-x-hidden overscroll-y-contain pr-1 lg:order-1 lg:max-h-full lg:w-[400px] lg:max-w-[40vw]">
-        <TripForm
-          value={form}
-          onChange={setForm}
-          onSubmit={onSubmit}
-          onLoadDemo={onLoadDemo}
-          busy={busy}
-        />
+    <div className="relative left-1/2 min-w-0 w-screen max-w-[100vw] -translate-x-1/2 overflow-x-clip px-3 sm:px-5 lg:px-8">
+      {showPlanProgressShell ? (
+        <div className="w-full">
+          <TripPlanningLoadingView cityLabel={form.city} />
+          {err ? (
+            <p className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-center text-xs text-red-200">
+              {err}
+            </p>
+          ) : null}
+        </div>
+      ) : (
+    <div
+      className={`flex w-full min-w-0 flex-col gap-4 lg:h-[calc(100vh-5.5rem)] ${plan ? "lg:flex-row lg:items-stretch lg:gap-5" : ""}`}
+    >
+      <section
+        className={`order-1 flex min-h-0 w-full min-w-0 flex-col gap-3 overflow-y-auto overflow-x-hidden overscroll-y-contain ${
+          plan
+            ? "lg:order-1 lg:max-h-full lg:flex-[1.15_1_0] lg:min-w-[min(100%,420px)] lg:max-w-none"
+            : "lg:mx-auto lg:max-w-2xl lg:py-4"
+        }`}
+      >
+        <div className="rounded-3xl border border-white/[0.08] bg-black/35 p-4 shadow-xl shadow-black/30">
+          <TripChatPanel
+            messages={chatMessages}
+            onSend={handleChatSend}
+            busy={chatBusy}
+            canType={!busy}
+            variant={plan ? "compact" : "hero"}
+            onBuildItinerary={buildItinerary}
+            buildDisabled={buildDisabled}
+            buildBusy={busy}
+            buildLabel={buildLabel}
+            buildHighlighted={buildHighlighted}
+            onNewTrip={startFreshTrip}
+          />
+
+          <div className="mt-3 border-t border-white/[0.06] pt-3">
+            <p className="mb-1.5 text-[10px] uppercase tracking-widest text-parchment/40">Where</p>
+            <CityConfirmField value={form} onChange={setForm} />
+          </div>
+
+          {itinerarySuggested && !plan ? (
+            <div className="mt-3 rounded-xl border border-wander/30 bg-wander-muted px-3 py-2.5 text-center text-[11px] leading-snug text-parchment/90">
+              {form.cityLocationReady ? (
+                <>Enough detail — Build / Update next to Send, or Wander will refresh the map when ready.</>
+              ) : (
+                <>Confirm the Where line above, then use Build next to Send.</>
+              )}
+            </div>
+          ) : null}
+
+          <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-white/[0.06] pt-3">
+            {awaitingCityForPlan && !form.cityLocationReady ? (
+              <span className="text-[10px] text-amber-200/90">Pick the city in Where first.</span>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => setManualFieldsOpen(true)}
+              className="text-[11px] text-parchment/50 underline-offset-2 hover:text-parchment hover:underline"
+            >
+              All trip fields…
+            </button>
+          </div>
+        </div>
+
         {err && (
           <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">{err}</p>
         )}
+
+        {manualFieldsOpen && (
+          <div
+            className="fixed inset-0 z-[45] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="manual-trip-fields-title"
+            onClick={() => setManualFieldsOpen(false)}
+          >
+            <div
+              className="max-h-[min(88vh,720px)] w-full max-w-lg overflow-y-auto overscroll-contain rounded-2xl border border-white/10 bg-coal p-4 shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="mb-3 flex items-start justify-between gap-3">
+                <div>
+                  <h2 id="manual-trip-fields-title" className="font-serif text-lg text-parchment">
+                    Trip fields
+                  </h2>
+                  <p className="mt-0.5 text-[11px] text-parchment/45">Optional — chat usually fills these. Escape to close.</p>
+                </div>
+                <button
+                  type="button"
+                  className="rounded-lg border border-white/10 px-2.5 py-1 text-xs text-parchment/80 hover:bg-white/5"
+                  onClick={() => setManualFieldsOpen(false)}
+                >
+                  Close
+                </button>
+              </div>
+              <TripForm
+                value={form}
+                onChange={setForm}
+                onSubmit={() => {
+                  buildItinerary();
+                  setManualFieldsOpen(false);
+                }}
+                onLoadDemo={() => {
+                  onLoadDemo();
+                  setManualFieldsOpen(false);
+                }}
+                busy={busy}
+              />
+            </div>
+          </div>
+        )}
+
         {plan && (
           <>
             <TripSummary
@@ -373,15 +685,17 @@ export function TripPlannerClient() {
             </div>
           </>
         )}
-        {!plan && !busy && (
-          <p className="text-xs text-parchment/50">
-            Generate a trip with AI, or <strong>Load SF demo</strong> to see the map, route line, and timeline without any
-            API keys.
+
+        {!plan && !busy && !chatBusy && (
+          <p className="text-center text-[11px] text-parchment/40">
+            Needs <code className="text-parchment/55">ANTHROPIC_API_KEY</code> or <code className="text-parchment/55">OPENAI_API_KEY</code>
+            . SF demo: <button type="button" className="text-wander/90 hover:underline" onClick={() => setManualFieldsOpen(true)}>All trip fields</button> → Load SF demo.
           </p>
         )}
       </section>
-      <section className="order-1 relative h-[50vh] min-h-[300px] flex-1 overflow-hidden rounded-2xl border border-white/10 lg:order-2 lg:h-auto">
-        {plan ? (
+
+      {plan ? (
+        <section className="order-2 relative h-[42vh] min-h-[280px] w-full min-w-0 shrink-0 overflow-hidden rounded-2xl border border-white/10 lg:h-auto lg:min-h-0 lg:flex-[1.35_1_0] lg:min-w-[min(100%,360px)]">
           <TripMap
             mapboxToken={mapboxToken}
             plan={plan}
@@ -391,13 +705,8 @@ export function TripPlannerClient() {
             routeFeature={routeFeature}
             extraMarkers={extraMarkers}
           />
-        ) : (
-          <div className="flex h-full min-h-[300px] flex-col items-center justify-center gap-2 p-6 text-center text-parchment/60">
-            <p className="font-serif text-lg text-parchment/90">Your itinerary map will appear here</p>
-            <p className="max-w-sm text-sm">Generate a trip or load the San Francisco demo. Set a Mapbox public token in .env for the map; routing uses your token when set, or OSRM as a fallback.</p>
-          </div>
-        )}
-      </section>
+        </section>
+      ) : null}
       {plan && expandedStop && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
@@ -546,6 +855,8 @@ export function TripPlannerClient() {
             </div>
           </div>
         </div>
+      )}
+    </div>
       )}
     </div>
   );

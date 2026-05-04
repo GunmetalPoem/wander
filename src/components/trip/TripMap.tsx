@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import Map, { Layer, Marker, NavigationControl, Source } from "react-map-gl/mapbox";
 import type { MapRef } from "react-map-gl/mapbox";
+import type mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import type { TripPlan, TripStop } from "@/lib/trip-schema";
 
@@ -95,6 +96,107 @@ export function TripMap({
     });
   }, []);
 
+  const onLoad = useCallback((e: { target: mapboxgl.Map }) => {
+    const map = e.target;
+
+    /** 3D ground + volumetric buildings (streets-v12 does not bundle Standard-style 3D “city meshes”). */
+    const ensureDemSource = () => {
+      if (map.getSource("mapbox-dem")) return;
+      try {
+        map.addSource("mapbox-dem", {
+          type: "raster-dem",
+          url: "mapbox://mapbox.mapbox-terrain-dem-v1",
+          tileSize: 512,
+          maxzoom: 14,
+        });
+      } catch {
+        /* style may already define a different terrain source id */
+      }
+    };
+
+    try {
+      ensureDemSource();
+      if (map.getSource("mapbox-dem")) {
+        // Subtle elevation; high exaggeration + fog reads as “the map went dull” once terrain resolves.
+        map.setTerrain({ source: "mapbox-dem", exaggeration: 0.85 });
+      }
+      // Avoid “spotlight/vignette” effects that can make markers feel like they fade by screen position.
+      // Keep terrain, but remove fog + custom light.
+      map.setFog(null);
+    } catch {
+      /* ignore unsupported env */
+    }
+
+    /** Add 3D buildings from composite vector tiles (shows up when zoomed in). */
+    if (!map.getSource("composite")) return;
+    try {
+      if (!map.getLayer("3d-buildings")) {
+        map.addLayer(
+          {
+            id: "3d-buildings",
+            source: "composite",
+            "source-layer": "building",
+            filter: ["==", ["get", "extrude"], "true"],
+            type: "fill-extrusion",
+            minzoom: 14,
+            paint: {
+              "fill-extrusion-color": [
+                "interpolate",
+                ["linear"],
+                ["get", "height"],
+                0,
+                "#cbd5e1",
+                60,
+                "#94a3b8",
+                200,
+                "#64748b",
+              ],
+              "fill-extrusion-height": [
+                "interpolate",
+                ["linear"],
+                ["zoom"],
+                14,
+                0,
+                15,
+                ["get", "height"],
+              ],
+              "fill-extrusion-base": ["get", "min_height"],
+              // Keep buildings readable without dimming streets/labels underneath.
+              "fill-extrusion-opacity": 0.55,
+              "fill-extrusion-ambient-occlusion-intensity": 0.12,
+              "fill-extrusion-emissive-strength": 0,
+            },
+          },
+          "tunnel-minor-case",
+        );
+      }
+    } catch {
+      // style may not have tunnel-minor-case; fallback without insertion order
+      try {
+        if (!map.getLayer("3d-buildings")) {
+          map.addLayer({
+            id: "3d-buildings",
+            source: "composite",
+            "source-layer": "building",
+            filter: ["==", ["get", "extrude"], "true"],
+            type: "fill-extrusion",
+            minzoom: 14,
+            paint: {
+              "fill-extrusion-color": "#94a3b8",
+              "fill-extrusion-height": ["get", "height"],
+              "fill-extrusion-base": ["get", "min_height"],
+              "fill-extrusion-opacity": 0.52,
+              "fill-extrusion-ambient-occlusion-intensity": 0.12,
+              "fill-extrusion-emissive-strength": 0,
+            },
+          });
+        }
+      } catch {
+        /* composite layer differs by style/version */
+      }
+    }
+  }, []);
+
   useEffect(() => {
     if (!selectedStopId) return;
     const s = stops.find((x) => x.id === selectedStopId);
@@ -124,6 +226,7 @@ export function TripMap({
         style={{ width: "100%", height: "100%" }}
         interactiveLayerIds={[]}
         reuseMaps
+        onLoad={onLoad}
       >
         <NavigationControl position="top-left" showCompass />
         {routeFeature && (
@@ -153,6 +256,9 @@ export function TripMap({
               longitude={s.lng}
               latitude={s.lat}
               anchor="center"
+              pitchAlignment="viewport"
+              rotationAlignment="viewport"
+              style={{ zIndex: 10001 }}
               onClick={(e) => {
                 e.originalEvent?.stopPropagation?.();
                 onSelectStop(s.id);
@@ -160,10 +266,10 @@ export function TripMap({
             >
               <button
                 type="button"
-                className={`flex h-8 w-8 items-center justify-center rounded-full border-2 text-xs font-bold shadow-lg transition ${
+                className={`flex h-8 w-8 items-center justify-center rounded-full border-2 text-xs font-bold shadow-[0_10px_25px_rgba(0,0,0,0.55)] transition ${
                   selectedStopId === s.id
                     ? "border-ember bg-ember text-white"
-                    : "border-white/80 bg-black/80 text-parchment hover:border-ember"
+                    : "border-white bg-slate-950 text-white hover:border-ember"
                 } ${
                   s.locationConfidence != null && s.locationConfidence < 0.6 ? "ring-2 ring-amber-500/60" : ""
                 }`}
@@ -175,7 +281,15 @@ export function TripMap({
           );
         })}
         {extraMarkers.map((m) => (
-          <Marker key={m.id} longitude={m.lng} latitude={m.lat} anchor="center">
+          <Marker
+            key={m.id}
+            longitude={m.lng}
+            latitude={m.lat}
+            anchor="center"
+            pitchAlignment="viewport"
+            rotationAlignment="viewport"
+            style={{ zIndex: 10000 }}
+          >
             <span
               className="block h-2.5 w-2.5 rounded-full border border-white shadow"
               style={{ background: m.color ?? "#60a5fa" }}

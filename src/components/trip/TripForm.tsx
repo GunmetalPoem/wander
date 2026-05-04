@@ -1,7 +1,6 @@
 "use client";
 
 import { defaultTripForm, paceOptions, vibeOptions, type TripFormInput } from "@/lib/trip-schema";
-import { CityConfirmField } from "./CityConfirmField";
 
 type Props = {
   value: TripFormInput;
@@ -14,7 +13,6 @@ type Props = {
 export function TripForm({ value, onChange, onSubmit, onLoadDemo, busy }: Props) {
   return (
     <div className="space-y-4 rounded-2xl border border-white/10 bg-black/30 p-4 text-sm text-parchment/90">
-      <CityConfirmField value={value} onChange={onChange} />
       <div className="grid grid-cols-2 gap-2">
         <div>
           <label className="text-xs text-parchment/50">Days</label>
@@ -32,7 +30,7 @@ export function TripForm({ value, onChange, onSubmit, onLoadDemo, busy }: Props)
           <input
             type="number"
             min={1}
-            max={20}
+            max={50}
             className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-parchment"
             value={value.groupSize}
             onChange={(e) =>

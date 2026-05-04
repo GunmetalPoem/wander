@@ -10,6 +10,7 @@ import {
 import { getGoogleGeoKeyFromEnv, refineTripPlanWithMapbox } from "@/lib/trip-geocode";
 import { enrichTripPlan } from "@/lib/trip-enrich";
 import { fetchTripWeather } from "@/lib/weather";
+import { optimizeTripPlanForCloseness } from "@/lib/trip-optimize";
 import { z } from "zod";
 
 export const maxDuration = 120;
@@ -66,12 +67,23 @@ const SYSTEM = `You are a travel planner API. You output ONLY valid JSON (no mar
 Rules:
 - Return null for "lat" and "lng" on every stop. Only return name, address, city (via "city"), and descriptions. Do not guess or invent coordinates.
 - "city_center" is the only place you give approximate map coordinates: use a real central point in the destination city (WGS84).
-- Use real, verifiable places. Prefer a walkable order for walking transport.
+- Use real, verifiable places.
 - 3-8 stops per day depending on pace: packed=more, relaxed=fewer.
 - Each stop must have unique "id" strings.
 - Descriptions must be specific and useful, not generic.
 - "travel_minutes_to_next" is your estimate; it may be refined with routing later.
-- If the city is ambiguous, pick the well-known one (e.g. "SF" = San Francisco, USA).`;
+- If the city is ambiguous, pick the well-known one (e.g. "SF" = San Francisco, USA).
+
+Geography & route shape (critical):
+- List stops in an order you could actually walk or drive without crossing the city repeatedly: each next stop should be near the previous cluster (same neighborhood or adjacent), not "east → west → east again".
+- For walking transport especially: stay within 1–3 contiguous areas per day unless a rare must-see justifies a longer hop.
+
+Timing, meals, and pacing:
+- Think in clock time: morning sights → midday meal (use "best_time": "midday" and category foodie for sit-down lunch, ~45–90 min "duration_minutes") → afternoon → optional coffee/snack before a long leg → evening if needed.
+- Put at least one proper food stop around lunch (11:30–2) when the day is 4+ hours of activities; do not stack three museums and then only dinner unless pace is packed and you add a quick snack stop with short duration.
+- "duration_minutes" must be realistic for the activity (museums 60–120, parks 45–90, coffee 20–35, sit-down meal 60–90).
+- "best_time" on each stop should match when a visitor would normally do that activity; align food stops to midday or evening as appropriate.
+- Leave plausible gaps: "travel_minutes_to_next" should reflect distance + buffer after meals (people do not teleport after lunch).`;
 
 function budgetTierFromAmount(amt: number): "budget" | "mid" | "splurge" {
   if (!Number.isFinite(amt) || amt <= 0) return "mid";
@@ -131,6 +143,11 @@ Group size: ${input.groupSize}. Budget: about $${Math.round(input.budgetAmount)}
 Interests: ${input.vibes.join(", ")}.
 ${input.tripDate ? `Trip date (start): ${input.tripDate} (use it for weather-aware choices).\n` : ""}${accessibilityLines ? `Accessibility preferences:\n${accessibilityLines}\n` : ""}
 ${input.mustInclude ? `Must include or work in: ${input.mustInclude}\n` : ""}
+Closeness + meals + narrative:
+- Each day: one continuous geographic thread (neighborhood A → nearby B → nearby C). Never order stops so the route obviously doubles back across town unless the trip explicitly needs two hubs—if so, group all A stops then move once to B.
+- Place lunch (or main midday food) after morning activities and before distant afternoon stops; snacks/coffee near long walks.
+- Match "best_time" + "duration_minutes" + "travel_minutes_to_next" so a human could execute the day without eating dinner at 3pm or sprinting 40 minutes between every stop.
+- If a chain has multiple locations, pick the branch closest to your day's cluster.
 Return the JSON object only.`;
 
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
@@ -216,6 +233,13 @@ Return the JSON object only.`;
   // Enrich with cuisine/opening_hours/etc when possible (best-effort).
   try {
     plan = await enrichTripPlan(plan);
+  } catch {
+    // ignore
+  }
+
+  // Optimize stop order for proximity once we have coordinates.
+  try {
+    plan = optimizeTripPlanForCloseness(plan);
   } catch {
     // ignore
   }

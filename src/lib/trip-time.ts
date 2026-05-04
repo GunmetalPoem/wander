@@ -17,6 +17,28 @@ function fmt(h: number, m: number) {
  * Arrival / depart labels from a simple minute timeline.
  * `legDurationSeconds[i]` = travel from stop i to i+1.
  */
+/** First clock time for the day timeline from the first stop’s intended daypart. */
+export function suggestedDayStartMinutes(stops: TripStop[]): { hour: number; minute: number } {
+  if (!stops.length) return { hour: 9, minute: 0 };
+  const b = stops[0]?.best_time ?? "morning";
+  switch (b) {
+    case "early_morning":
+      return { hour: 7, minute: 30 };
+    case "morning":
+      return { hour: 9, minute: 0 };
+    case "midday":
+      return { hour: 11, minute: 0 };
+    case "afternoon":
+      return { hour: 13, minute: 30 };
+    case "evening":
+      return { hour: 16, minute: 30 };
+    case "night":
+      return { hour: 18, minute: 0 };
+    default:
+      return { hour: 9, minute: 0 };
+  }
+}
+
 export function scheduleDayStops(
   stops: TripStop[],
   legDurationSeconds: number[],

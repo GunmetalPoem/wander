@@ -1,11 +1,50 @@
+@import url("https://fonts.googleapis.com/css2?family=Momo+Trust+Display&family=SUSE:ital,wght@0,100..900;1,100..900&display=swap");
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/** Momo Trust Display — titles & display lines */
+.momo-trust-display-regular {
+  font-family: "Momo Trust Display", sans-serif;
+  font-weight: 400;
+  font-style: normal;
+}
+
+/**
+ * SUSE — body & UI (variable weight 100–900 via Tailwind font-* utilities).
+ * Use as a stable class name for base copy when not relying on `font-sans`.
+ */
+.suse-body {
+  font-family: "SUSE", sans-serif;
+  font-optical-sizing: auto;
+  font-weight: 400;
+  font-style: normal;
+}
 
 :root {
   color-scheme: dark;
 }
 
-body {
-  @apply bg-dusk text-parchment antialiased;
+@layer base {
+  html {
+    @apply scroll-smooth;
+  }
+
+  body {
+    @apply bg-void text-parchment antialiased;
+    font-family: "SUSE", ui-sans-serif, system-ui, sans-serif;
+    font-optical-sizing: auto;
+  }
+}
+
+/* Mapbox: keep custom HTML markers crisp at pitch/zoom. */
+.mapboxgl-marker {
+  opacity: 1 !important;
+  filter: none !important;
+  transform-origin: center !important;
+}
+
+.mapboxgl-marker button {
+  opacity: 1 !important;
 }
