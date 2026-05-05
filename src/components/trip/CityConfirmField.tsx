@@ -97,7 +97,7 @@ export function CityConfirmField({ value, onChange }: Props) {
       <div>
         <label className="text-xs text-parchment/50">City</label>
         <input
-          className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-parchment outline-none focus:border-ember/60"
+          className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-parchment outline-none focus:border-wander/60"
           value={value.city}
           onChange={(e) => {
             onChange({ ...value, city: e.target.value, cityCenter: null, cityLocationReady: false });
@@ -113,7 +113,7 @@ export function CityConfirmField({ value, onChange }: Props) {
         <div>
           <label className="text-xs text-parchment/50">Confirm location (state / region)</label>
           <select
-            className="mt-1 w-full rounded-lg border border-amber-500/25 bg-black/50 px-2 py-2 text-sm text-parchment"
+            className="mt-1 w-full rounded-lg border border-white/15 bg-black/50 px-2 py-2 text-sm text-parchment"
             value={selectValue}
             onChange={(e) => onSelectChange(e.target.value)}
           >
@@ -125,7 +125,7 @@ export function CityConfirmField({ value, onChange }: Props) {
             ))}
           </select>
           {needPick && (
-            <p className="mt-1 text-[10px] text-amber-200/80">
+            <p className="mt-1 text-[10px] text-wander/75">
               Several places share that name. Choose the one you mean so the trip is planned in the right place.
             </p>
           )}

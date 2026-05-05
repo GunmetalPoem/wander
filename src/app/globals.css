@@ -48,3 +48,57 @@
 .mapboxgl-marker button {
   opacity: 1 !important;
 }
+
+/* Mapbox chrome — match coal / wander (scope so we don’t affect other pages). */
+.trip-map-shell .mapboxgl-ctrl-group {
+  background: rgba(10, 10, 12, 0.94) !important;
+  border-radius: 12px !important;
+  border: 1px solid rgba(255, 255, 255, 0.09) !important;
+  box-shadow: 0 10px 36px rgba(0, 0, 0, 0.55) !important;
+  overflow: hidden;
+}
+
+.trip-map-shell .mapboxgl-ctrl-group button {
+  width: 38px !important;
+  height: 38px !important;
+  background: transparent !important;
+}
+
+.trip-map-shell .mapboxgl-ctrl-group button + button {
+  border-top: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+
+.trip-map-shell .mapboxgl-ctrl button:hover {
+  background: rgba(52, 211, 153, 0.14) !important;
+}
+
+.trip-map-shell .mapboxgl-ctrl-icon {
+  filter: invert(1) brightness(1.05);
+  opacity: 0.88;
+}
+
+.trip-map-shell .mapboxgl-ctrl button:hover .mapboxgl-ctrl-icon {
+  opacity: 1;
+}
+
+.trip-map-shell .mapboxgl-ctrl-attrib,
+.trip-map-shell .mapboxgl-ctrl-attrib-inner {
+  background: rgba(10, 10, 12, 0.82) !important;
+  color: rgba(232, 232, 236, 0.5) !important;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px 0 0 0;
+  font-family: "SUSE", ui-sans-serif, system-ui, sans-serif;
+  font-size: 10px;
+}
+
+.trip-map-shell .mapboxgl-ctrl-attrib a {
+  color: rgba(52, 211, 153, 0.88) !important;
+}
+
+.trip-map-shell .mapboxgl-ctrl-attrib a:hover {
+  color: rgb(52, 211, 153) !important;
+}
+
+.trip-map-shell .mapboxgl-ctrl-logo {
+  filter: brightness(0.65) contrast(1.1);
+}

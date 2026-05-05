@@ -8,10 +8,30 @@ export type TripChatPatch = {
   pace?: string;
   vibes?: string[];
   mustInclude?: string;
+  /** Place names to omit on the next plan (merged with existing exclusions). */
+  mustExclude?: string;
   transport?: string;
   tripDate?: string;
   accessibility?: Partial<TripFormInput["accessibility"]>;
 };
+
+/** Merge semicolon-separated venue names; cap length for API limits. */
+export function appendMustExclude(prev: string, addition: string): string {
+  const add = addition.trim();
+  if (!add) return prev.slice(0, 2000);
+  const parts = prev
+    .split(/[;\n]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const seen = new Set(parts.map((p) => p.toLowerCase()));
+  for (const chunk of add.split(/[;\n]+/).map((s) => s.trim()).filter(Boolean)) {
+    if (!seen.has(chunk.toLowerCase())) {
+      seen.add(chunk.toLowerCase());
+      parts.push(chunk);
+    }
+  }
+  return parts.join("; ").slice(0, 2000);
+}
 
 function isPace(s: string): s is TripFormInput["pace"] {
   return (paceOptions as readonly string[]).includes(s);
@@ -110,6 +130,9 @@ export function mergeTripChatPatch(form: TripFormInput, patch: TripChatPatch | u
   }
   if (typeof patch.mustInclude === "string") {
     next.mustInclude = patch.mustInclude.slice(0, 2000);
+  }
+  if (typeof patch.mustExclude === "string" && patch.mustExclude.trim()) {
+    next.mustExclude = appendMustExclude(next.mustExclude, patch.mustExclude.trim());
   }
   if (patch.transport === "walking" || patch.transport === "driving") {
     next.transport = patch.transport;

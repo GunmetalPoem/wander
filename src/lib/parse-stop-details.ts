@@ -57,7 +57,7 @@ export async function parseStopDetailsFromPage(params: {
   if (!key) throw new Error("OPENAI_API_KEY is not set");
 
   const client = new OpenAI({ apiKey: key });
-  const model = process.env.OPENAI_MODEL ?? "gpt-4o-mini";
+  const model = process.env.OPENAI_MODEL ?? "gpt-5.4";
 
   const user = `Stop name: ${params.stopName}
 Category: ${params.stopCategory}
@@ -71,7 +71,7 @@ ${params.pageText}
   const resp = await client.chat.completions.create({
     model,
     temperature: 0.2,
-    max_tokens: 1200,
+    max_completion_tokens: 1200,
     response_format: { type: "json_object" },
     messages: [
       { role: "system", content: SYSTEM },

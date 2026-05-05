@@ -18,7 +18,7 @@ type Props = {
   messages: TripChatMessage[];
   onSend: (text: string) => Promise<void>;
   busy: boolean;
-  /** When false, composer is disabled (e.g. plan generation in flight). */
+  /** When false, textarea / Send / chips are locked (trip chat API in flight — not itinerary build). */
   canType: boolean;
   variant?: "hero" | "compact";
   /** Shown beside Send — generates / refreshes the itinerary from current fields. */
@@ -57,10 +57,10 @@ export function TripChatPanel({
 
   const submit = useCallback(async () => {
     const t = draft.trim();
-    if (!t || busy || !canType) return;
+    if (!t || !canType) return;
     setDraft("");
     await onSend(t);
-  }, [draft, busy, canType, onSend]);
+  }, [draft, canType, onSend]);
 
   return (
     <div className={`flex flex-col ${isHero ? "min-h-0 flex-1" : "border-b border-white/5 pb-3"}`}>
@@ -84,7 +84,7 @@ export function TripChatPanel({
             <button
               type="button"
               onClick={onNewTrip}
-              disabled={busy || buildBusy || !canType}
+              disabled={buildBusy || !canType}
               className="text-[10px] text-parchment/45 underline-offset-2 hover:text-parchment hover:underline disabled:opacity-40"
             >
               New trip
@@ -126,7 +126,7 @@ export function TripChatPanel({
       <div className="rounded-2xl border border-white/[0.08] bg-black/35 p-1 shadow-inner shadow-black/20">
         <div className="flex items-center justify-between gap-2 border-b border-white/[0.06] px-2.5 py-1.5">
           <p className="flex min-w-0 flex-1 items-center gap-1.5 text-[10px] text-parchment/45">
-            <span className="text-amber-200/90" aria-hidden>
+            <span className="text-wander/75" aria-hidden>
               ↯
             </span>
             <span className="truncate">Tips: dates, group size, budget per day, walking vs driving</span>
@@ -135,7 +135,7 @@ export function TripChatPanel({
             <button
               type="button"
               onClick={onNewTrip}
-              disabled={busy || buildBusy || !canType}
+              disabled={buildBusy || !canType}
               className="shrink-0 text-[10px] text-parchment/45 underline-offset-2 hover:text-parchment hover:underline disabled:opacity-40"
             >
               New trip
@@ -152,7 +152,7 @@ export function TripChatPanel({
             className="min-h-[44px] w-full flex-1 resize-none rounded-xl border border-transparent bg-transparent px-2 py-2 text-sm text-parchment placeholder:text-parchment/35 outline-none focus:border-wander/30 focus:ring-0 disabled:opacity-50 sm:min-w-0"
             placeholder="Ask anything about your trip…"
             value={draft}
-            disabled={!canType || busy}
+            disabled={!canType}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
@@ -170,7 +170,7 @@ export function TripChatPanel({
                 title={buildDisabled ? "Confirm city in Where below (first trip) or wait until chat finishes" : buildLabel}
                 className={`min-h-[44px] flex-1 rounded-xl border px-3 py-2 text-xs font-semibold transition sm:flex-initial sm:min-w-[7.5rem] ${
                   buildDisabled
-                    ? "cursor-not-allowed border-amber-500/35 bg-amber-500/10 text-parchment/45"
+                    ? "cursor-not-allowed border-white/20 bg-white/[0.06] text-parchment/45"
                     : buildHighlighted
                       ? "border-wander/60 bg-wander text-ink ring-2 ring-wander/70 shadow-[0_0_20px_rgba(52,211,153,0.25)] hover:bg-wander/95"
                       : "border-white/15 bg-white/[0.08] text-parchment/90 hover:border-wander/40 hover:bg-wander-muted"
@@ -182,7 +182,7 @@ export function TripChatPanel({
             <button
               type="button"
               onClick={() => void submit()}
-              disabled={!draft.trim() || busy || !canType}
+              disabled={!draft.trim() || !canType}
               className="min-h-[44px] flex-1 rounded-xl bg-wander/90 px-3 py-2 text-xs font-semibold text-ink shadow-md shadow-black/30 transition hover:bg-wander disabled:cursor-not-allowed disabled:opacity-40 sm:flex-initial sm:min-w-[4.5rem]"
             >
               Send
@@ -196,7 +196,7 @@ export function TripChatPanel({
           <button
             key={s}
             type="button"
-            disabled={busy || !canType}
+            disabled={!canType}
             onClick={() => void onSend(s)}
             className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-left text-[11px] text-parchment/70 transition hover:border-wander/30 hover:bg-wander-muted hover:text-parchment/90 disabled:opacity-40"
           >

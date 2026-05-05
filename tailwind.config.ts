@@ -17,7 +17,6 @@ export default {
       colors: {
         ink: "#030306",
         parchment: "#e8e8ec",
-        ember: "#d4652a",
         moss: "#2d5a4a",
         /** Legacy token — deep blue-gray; prefer void/coal for new UI */
         dusk: "#0a0a0f",

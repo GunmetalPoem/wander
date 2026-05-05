@@ -2,7 +2,7 @@
   "name": "wander",
   "version": "0.1.0",
   "private": true,
-  "description": "Wander — AI trip planner (Mapbox) and hyperlocal quest discovery (Lab + /lore feed).",
+  "description": "Wander — AI trip planner with Mapbox and routing.",
   "scripts": {
     "clean": "rm -rf .next",
     "dev": "next dev",

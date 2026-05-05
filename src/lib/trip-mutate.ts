@@ -8,3 +8,9 @@ export function replaceDayStops(plan: TripPlan, dayNum: number, stops: TripStop[
     },
   };
 }
+
+export function removeStopFromDay(plan: TripPlan, dayNum: number, stopId: string): TripPlan {
+  const day = plan.trip.days.find((d) => d.day === dayNum);
+  const nextStops = (day?.stops ?? []).filter((s) => s.id !== stopId);
+  return replaceDayStops(plan, dayNum, nextStops);
+}

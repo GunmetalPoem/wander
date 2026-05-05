@@ -23,6 +23,7 @@ const RequestBodySchema = z.object({
   pace: z.enum(["packed", "balanced", "relaxed"]).optional(),
   vibes: z.array(z.string()).optional(),
   mustInclude: z.string().max(2000).optional(),
+  mustExclude: z.string().max(2000).optional(),
   transport: z.enum(["walking", "driving"]).optional(),
   cityCenter: z.object({ lat: z.number(), lng: z.number() }).nullish(),
   tripDate: z.string().nullish(),
@@ -73,6 +74,7 @@ Rules:
 - Descriptions must be specific and useful, not generic.
 - "travel_minutes_to_next" is your estimate; it may be refined with routing later.
 - If the city is ambiguous, pick the well-known one (e.g. "SF" = San Francisco, USA).
+- If the user prompt lists places to never include, do not add those venues (or obvious same-venue substitutes) to any day.
 
 Geography & route shape (critical):
 - List stops in an order you could actually walk or drive without crossing the city repeatedly: each next stop should be near the previous cluster (same neighborhood or adjacent), not "east → west → east again".
@@ -122,6 +124,7 @@ export async function POST(req: Request) {
       ? (b.vibes as TripFormInput["vibes"])
       : defaultTripForm.vibes,
     mustInclude: b.mustInclude?.trim() ?? "",
+    mustExclude: b.mustExclude?.trim() ?? "",
     transport: b.transport ?? defaultTripForm.transport,
     tripDate: (b.tripDate ?? defaultTripForm.tripDate) || "",
     accessibility,
@@ -142,8 +145,11 @@ export async function POST(req: Request) {
 Group size: ${input.groupSize}. Budget: about $${Math.round(input.budgetAmount)}/day (${budgetTier}). Pace: ${input.pace}. Transport between stops: ${input.transport}.
 Interests: ${input.vibes.join(", ")}.
 ${input.tripDate ? `Trip date (start): ${input.tripDate} (use it for weather-aware choices).\n` : ""}${accessibilityLines ? `Accessibility preferences:\n${accessibilityLines}\n` : ""}
-${input.mustInclude ? `Must include or work in: ${input.mustInclude}\n` : ""}
-Closeness + meals + narrative:
+${input.mustInclude ? `Must include or work in: ${input.mustInclude}\n` : ""}${
+    input.mustExclude
+      ? `Do NOT include these places or obvious substitutes at the same venue (user removed or rejected them): ${input.mustExclude}\n`
+      : ""
+  }Closeness + meals + narrative:
 - Each day: one continuous geographic thread (neighborhood A → nearby B → nearby C). Never order stops so the route obviously doubles back across town unless the trip explicitly needs two hubs—if so, group all A stops then move once to B.
 - Place lunch (or main midday food) after morning activities and before distant afternoon stops; snacks/coffee near long walks.
 - Match "best_time" + "duration_minutes" + "travel_minutes_to_next" so a human could execute the day without eating dinner at 3pm or sprinting 40 minutes between every stop.
@@ -170,9 +176,9 @@ Return the JSON object only.`;
   } else if (openaiKey) {
     const client = new OpenAI({ apiKey: openaiKey });
     const completion = await client.chat.completions.create({
-      model: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
+      model: process.env.OPENAI_MODEL ?? "gpt-5.4",
       temperature: 0.4,
-      max_tokens: 8192,
+      max_completion_tokens: 8192,
       response_format: { type: "json_object" },
       messages: [
         { role: "system", content: SYSTEM + "\nOutput a single JSON object with key trip." },
@@ -230,6 +236,9 @@ Return the JSON object only.`;
     }
   }
 
+  const cc = plan.trip.city_center;
+  const weatherPromise = fetchTripWeather(cc?.lat, cc?.lng, input.tripDate || null);
+
   // Enrich with cuisine/opening_hours/etc when possible (best-effort).
   try {
     plan = await enrichTripPlan(plan);
@@ -244,8 +253,7 @@ Return the JSON object only.`;
     // ignore
   }
 
-  const cc = plan.trip.city_center;
-  const weather = await fetchTripWeather(cc?.lat, cc?.lng, input.tripDate || null);
+  const weather = await weatherPromise;
 
   return NextResponse.json({
     plan,

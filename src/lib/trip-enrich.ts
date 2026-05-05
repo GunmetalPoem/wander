@@ -1,4 +1,8 @@
 import type { TripPlan, TripStop } from "@/lib/trip-schema";
+import { mapWithConcurrencyLimit } from "@/lib/map-with-concurrency";
+
+/** Overpass public endpoint — keep concurrency modest */
+const OVERPASS_ENRICH_CONCURRENCY = 4;
 
 type OverpassElement =
   | { type: "node"; id: number; lat: number; lon: number; tags?: Record<string, string> }
@@ -121,21 +125,21 @@ function applyOsmDetails(stop: TripStop, el: OverpassElement): TripStop {
 export async function enrichTripPlan(plan: TripPlan): Promise<TripPlan> {
   const days = [];
   for (const d of plan.trip.days) {
-    const stops: TripStop[] = [];
-    for (const s of d.stops) {
-      const c = stopCenter(s);
-      if (!c) {
-        stops.push(s);
-        continue;
-      }
-      try {
-        const els = await overpassLookupNearby(c.lat, c.lng, 140);
-        const best = pickBestElement(s, els);
-        stops.push(best ? applyOsmDetails(s, best) : s);
-      } catch {
-        stops.push(s);
-      }
-    }
+    const stops = await mapWithConcurrencyLimit(
+      d.stops,
+      OVERPASS_ENRICH_CONCURRENCY,
+      async (s) => {
+        const c = stopCenter(s);
+        if (!c) return s;
+        try {
+          const els = await overpassLookupNearby(c.lat, c.lng, 140);
+          const best = pickBestElement(s, els);
+          return best ? applyOsmDetails(s, best) : s;
+        } catch {
+          return s;
+        }
+      },
+    );
     days.push({ ...d, stops });
   }
   return { ...plan, trip: { ...plan.trip, days } };

@@ -123,7 +123,7 @@ export function TripForm({ value, onChange, onSubmit, onLoadDemo, busy }: Props)
                   })
                 }
                 className={`rounded-full px-2.5 py-0.5 text-xs transition ${
-                  on ? "bg-ember/80 text-white" : "bg-white/5 text-parchment/80 hover:bg-white/10"
+                  on ? "bg-wander/85 text-void" : "bg-white/5 text-parchment/80 hover:bg-white/10"
                 }`}
               >
                 {v.replace(/_/g, " ")}
@@ -142,6 +142,16 @@ export function TripForm({ value, onChange, onSubmit, onLoadDemo, busy }: Props)
         />
       </div>
       <div>
+        <label className="text-xs text-parchment/50">Never include (optional)</label>
+        <textarea
+          rows={2}
+          className="mt-1 w-full resize-y rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-parchment placeholder:text-parchment/30"
+          placeholder="Places to skip on the next rebuild — also filled when you delete a stop from the timeline."
+          value={value.mustExclude}
+          onChange={(e) => onChange({ ...value, mustExclude: e.target.value.slice(0, 2000) })}
+        />
+      </div>
+      <div>
         <label className="text-xs text-parchment/50">Between stops</label>
         <div className="mt-1 flex gap-2">
           {(
@@ -155,7 +165,7 @@ export function TripForm({ value, onChange, onSubmit, onLoadDemo, busy }: Props)
               key={k}
               onClick={() => onChange({ ...value, transport: k })}
               className={`flex-1 rounded-lg py-2 text-xs ${
-                value.transport === k ? "bg-ember/80 text-white" : "bg-white/5 text-parchment/80"
+                value.transport === k ? "bg-wander/85 text-void" : "bg-white/5 text-parchment/80"
               }`}
             >
               {label}
@@ -168,7 +178,7 @@ export function TripForm({ value, onChange, onSubmit, onLoadDemo, busy }: Props)
           type="button"
           onClick={onSubmit}
           disabled={busy || !value.cityLocationReady}
-          className="rounded-lg bg-ember px-4 py-2.5 text-sm font-medium text-white disabled:opacity-50"
+          className="rounded-lg bg-wander px-4 py-2.5 text-sm font-medium text-void hover:bg-wander/90 disabled:opacity-50"
         >
           {busy ? "Planning…" : "Generate trip"}
         </button>

@@ -1,9 +1,13 @@
 import { distance } from "fastest-levenshtein";
 import type { TripPlan, TripStop } from "@/lib/trip-schema";
+import { mapWithConcurrencyLimit } from "@/lib/map-with-concurrency";
 
 type Center = { lat: number; lng: number };
 
 /** Mapbox name-match threshold. */
+/** Parallel stop resolves — bounded to avoid bursting provider rate limits */
+const STOP_GEOCODE_CONCURRENCY = 8;
+
 const MAPBOX_MIN_CONF = 0.4;
 /**
  * Google: primary resolver — more permissive; also accept strong geographic match when
@@ -440,10 +444,25 @@ async function tryGoogleResolve(
     `${stop.name} ${stop.address} ${city}`,
     `${stop.address} ${city}`,
   ];
-  for (const q of queries) {
-    const t = q.trim();
-    if (t.length < 3) continue;
-    const cands = await googlePlacesTextSearch(t, googleKey, cityCenter);
+
+  const textIndexed = queries
+    .map((q, qi) => ({ qi, t: q.trim() }))
+    .filter(({ t }) => t.length >= 3);
+
+  const textRows =
+    textIndexed.length > 0 ?
+      (
+        await Promise.all(
+          textIndexed.map(async ({ qi, t }) => ({
+            qi,
+            t,
+            cands: await googlePlacesTextSearch(t, googleKey, cityCenter),
+          })),
+        )
+      ).sort((a, b) => a.qi - b.qi)
+    : [];
+
+  for (const { cands } of textRows) {
     if (!cands.length) continue;
     const picked = pickFromGoogleCandidates(cands, stop, city, cityCenter);
     if (!picked) continue;
@@ -480,9 +499,25 @@ async function tryGoogleResolve(
       };
     }
   }
-  for (const q of [`${stop.name} ${city}`, `${stop.name}, ${city}`]) {
-    if (q.trim().length < 2) continue;
-    const c = await googleFindPlaceFromText(q, googleKey, cityCenter);
+
+  const findQueries = [`${stop.name} ${city}`, `${stop.name}, ${city}`]
+    .map((q, qi) => ({ qi, t: q.trim() }))
+    .filter(({ t }) => t.length >= 2);
+
+  const findRows =
+    findQueries.length > 0 ?
+      (
+        await Promise.all(
+          findQueries.map(async ({ qi, t }) => ({
+            qi,
+            t,
+            place: await googleFindPlaceFromText(t, googleKey, cityCenter),
+          })),
+        )
+      ).sort((a, b) => a.qi - b.qi)
+    : [];
+
+  for (const { place: c } of findRows) {
     if (!c) continue;
     const sim = nameSimilarity(stop.name, c.name);
     const dKm = haversineKm(cityCenter, { lat: c.lat, lng: c.lng });
@@ -510,6 +545,7 @@ async function tryGoogleResolve(
       };
     }
   }
+
   return null;
 }
 
@@ -581,15 +617,17 @@ export async function refineTripPlanWithMapbox(
       const nameSimOnly = (feature: SearchBoxFeature) => nameSimilarity(stop.name, displayName(feature) || stop.name);
       const queries = [`${stop.name} ${sCity}`.trim(), `${stop.name} ${stop.address} ${sCity}`.trim()];
       let features: SearchBoxFeature[] = [];
-      for (const part of ["poi", "poi,address,street"] as const) {
-        for (const q of queries) {
-          const f = await mapboxSearchBoxForward(q, mapbox, ctx, part);
-          if (f.length) {
-            features = f;
-            break;
-          }
+      for (const q of queries) {
+        if (!q.trim()) continue;
+        const [fPoi, fStreet] = await Promise.all([
+          mapboxSearchBoxForward(q, mapbox, ctx, "poi"),
+          mapboxSearchBoxForward(q, mapbox, ctx, "poi,address,street"),
+        ]);
+        const f = fPoi.length ? fPoi : fStreet;
+        if (f.length) {
+          features = f;
+          break;
         }
-        if (features.length) break;
       }
       if (features.length) {
         const feature = pickBestFeature(features, stop, center);
@@ -623,10 +661,11 @@ export async function refineTripPlanWithMapbox(
 
   const days = [];
   for (const d of plan.trip.days) {
-    const stops: TripStop[] = [];
-    for (const s of d.stops) {
-      stops.push(await resolveOneStop(s, city, cityCenter, mapboxToken, googleKey));
-    }
+    const stops = await mapWithConcurrencyLimit(
+      d.stops,
+      STOP_GEOCODE_CONCURRENCY,
+      (s) => resolveOneStop(s, city, cityCenter, mapboxToken, googleKey),
+    );
     days.push({ ...d, stops });
   }
   const setCenter = confirmed

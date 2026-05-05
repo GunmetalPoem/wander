@@ -8,8 +8,8 @@ import {
   type TripFormInput,
   type TripPlan,
 } from "@/lib/trip-schema";
-import { applyLastUserMessageTweaks, mergeTripChatPatch, type TripChatPatch } from "@/lib/trip-chat-merge";
-import { replaceDayStops } from "@/lib/trip-mutate";
+import { appendMustExclude, applyLastUserMessageTweaks, mergeTripChatPatch, type TripChatPatch } from "@/lib/trip-chat-merge";
+import { removeStopFromDay, replaceDayStops } from "@/lib/trip-mutate";
 import { scheduleDayStops, suggestedDayStartMinutes } from "@/lib/trip-time";
 import { TripForm } from "./TripForm";
 import { TripTimeline } from "./TripTimeline";
@@ -34,16 +34,16 @@ type RouteFeatureState = {
 
 function TripPlanningLoadingView({ cityLabel }: { cityLabel: string }) {
   return (
-    <div className="flex w-full max-w-[1600px] flex-col gap-3 lg:h-[calc(100vh-5.5rem)] lg:flex-row lg:gap-4">
-      <section className="relative order-1 flex min-h-[min(72vh,680px)] w-full flex-1 overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-coal via-void to-black lg:order-2 lg:min-h-[calc(100vh-6rem)]">
+    <div className="flex w-full justify-center lg:h-[calc(100vh-5.5rem)]">
+      <section className="relative flex min-h-[min(72vh,680px)] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-coal via-void to-black lg:min-h-[calc(100vh-6rem)]">
         <div className="pointer-events-none absolute inset-0 opacity-[0.07] [background-image:radial-gradient(circle_at_30%_20%,rgba(52,211,153,0.35),transparent_45%),radial-gradient(circle_at_80%_60%,rgba(255,255,255,0.12),transparent_40%)]" />
-        <div className="relative flex h-full min-h-[inherit] flex-col items-center justify-center gap-6 px-6 text-center">
-          <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] shadow-lg shadow-black/40">
+        <div className="relative flex min-h-[inherit] w-full flex-1 flex-col items-center justify-center gap-6 px-6 py-12">
+          <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] shadow-lg shadow-black/40">
             <div className="h-9 w-9 animate-spin rounded-full border-2 border-wander/25 border-t-wander" aria-hidden />
           </div>
-          <div>
-            <p className="font-serif text-2xl tracking-tight text-parchment sm:text-3xl">Building your itinerary</p>
-            <p className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-parchment/55">
+          <div className="flex w-full max-w-xl flex-col items-center text-center">
+            <h2 className="font-serif text-2xl tracking-tight text-parchment sm:text-3xl">Building your itinerary</h2>
+            <p className="mt-4 w-full text-balance text-center text-sm leading-relaxed text-parchment/55">
               Laying out your days and stops on the map
               {cityLabel ? (
                 <>
@@ -54,7 +54,7 @@ function TripPlanningLoadingView({ cityLabel }: { cityLabel: string }) {
               …
             </p>
           </div>
-          <p className="text-[11px] text-parchment/35">This usually takes a few seconds.</p>
+          <p className="text-center text-[11px] text-parchment/35">This usually takes a few seconds.</p>
         </div>
       </section>
     </div>
@@ -66,7 +66,7 @@ const WELCOME_MESSAGES: TripChatMessage[] = [
     id: "welcome",
     role: "assistant",
     content:
-      "I'm Wander. Tell me where you're going, how long you'll be there, and what you like to do — food, museums, outdoors, pace, budget, and so on. When the trip is clear enough I'll refresh the map automatically; you can also tap Build itinerary or Update trip next to Send. New trip clears everything and starts over.",
+      "I'm Wander. Tell me where you're going, how long you'll be there, and what you like to do — food, museums, outdoors, pace, budget, and so on. When the trip is clear enough I'll refresh the map automatically; you can also tap Build itinerary or Update trip next to Send. Remove stops from the timeline anytime (trash icon); those names stay on your “never include” list for the next rebuild, and you can ask me in chat to drop places too. New trip clears everything and starts over.",
   },
 ];
 
@@ -322,6 +322,7 @@ export function TripPlannerClient() {
           pace: f.pace,
           vibes: f.vibes,
           mustInclude: f.mustInclude,
+          mustExclude: f.mustExclude,
           transport: f.transport,
           tripDate: f.tripDate || null,
           accessibility: f.accessibility,
@@ -520,6 +521,24 @@ export function TripPlannerClient() {
     [plan, activeDay],
   );
 
+  const onDeleteStop = useCallback(
+    (stopId: string) => {
+      if (!plan) return;
+      const name = currentStops.find((s) => s.id === stopId)?.name ?? "this stop";
+      if (!window.confirm(`Remove “${name}” from day ${activeDay}? It will stay on your “never include” list for the next AI rebuild.`)) return;
+      const nextPlan = removeStopFromDay(plan, activeDay, stopId);
+      setPlan(nextPlan);
+      setForm((f) => ({ ...f, mustExclude: appendMustExclude(f.mustExclude, name) }));
+      const remaining = nextPlan.trip.days.find((d) => d.day === activeDay)?.stops ?? [];
+      setSelectedStopId((id) => {
+        if (id !== stopId) return id;
+        return remaining[0]?.id ?? null;
+      });
+      if (expandedStopId === stopId) setExpandedStopId(null);
+    },
+    [plan, activeDay, currentStops, expandedStopId],
+  );
+
   const extraMarkers = useMemo(
     () => nearby.map((n) => ({ id: n.id, name: n.name, lat: n.lat, lng: n.lng, color: "#60a5fa" })),
     [nearby],
@@ -553,12 +572,12 @@ export function TripPlannerClient() {
             : "lg:mx-auto lg:max-w-2xl lg:py-4"
         }`}
       >
-        <div className="rounded-3xl border border-white/[0.08] bg-black/35 p-4 shadow-xl shadow-black/30">
+        <div className="relative z-10 rounded-3xl border border-white/[0.08] bg-black/35 p-4 shadow-xl shadow-black/30">
           <TripChatPanel
             messages={chatMessages}
             onSend={handleChatSend}
             busy={chatBusy}
-            canType={!busy}
+            canType={!chatBusy}
             variant={plan ? "compact" : "hero"}
             onBuildItinerary={buildItinerary}
             buildDisabled={buildDisabled}
@@ -585,7 +604,7 @@ export function TripPlannerClient() {
 
           <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-white/[0.06] pt-3">
             {awaitingCityForPlan && !form.cityLocationReady ? (
-              <span className="text-[10px] text-amber-200/90">Pick the city in Where first.</span>
+              <span className="text-[10px] text-wander/80">Pick the city in Where first.</span>
             ) : null}
             <button
               type="button"
@@ -665,11 +684,14 @@ export function TripPlannerClient() {
               selectedStopId={selectedStopId}
               onSelectStop={setSelectedStopId}
               onExpandStop={setExpandedStopId}
+              onDeleteStop={onDeleteStop}
+              mapboxAccessToken={mapboxToken}
+              isRefreshing={busy && !!plan}
             />
             <div className="flex flex-wrap gap-2 border-t border-white/5 pt-2">
               <button
                 type="button"
-                className="text-xs text-ember/90 hover:underline"
+                className="text-xs text-wander/90 hover:underline"
                 onClick={() => {
                   void navigator.clipboard.writeText(JSON.stringify(plan, null, 2));
                 }}
@@ -705,6 +727,18 @@ export function TripPlannerClient() {
             routeFeature={routeFeature}
             extraMarkers={extraMarkers}
           />
+          {busy ? (
+            <div
+              className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-end gap-2 bg-gradient-to-t from-black/75 via-black/35 to-transparent pb-6 pt-16"
+              aria-live="polite"
+              aria-busy="true"
+            >
+              <div className="flex items-center gap-2 rounded-full border border-wander/25 bg-black/70 px-3 py-1.5 shadow-lg backdrop-blur-sm">
+                <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-wander/25 border-t-wander" />
+                <span className="text-[11px] font-medium text-parchment/95">Updating map &amp; stops…</span>
+              </div>
+            </div>
+          ) : null}
         </section>
       ) : null}
       {plan && expandedStop && (
@@ -747,7 +781,7 @@ export function TripPlannerClient() {
                 </div>
               )}
               {!deepBusy && expandedDeepHint && (
-                <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 text-xs text-amber-100/80">
+                <div className="rounded-xl border border-wander/25 bg-wander-muted p-3 text-xs text-parchment/80">
                   {expandedDeepHint}
                 </div>
               )}
@@ -810,7 +844,7 @@ export function TripPlannerClient() {
                       <p className="break-words">
                         <span className="text-parchment/50">Tickets:</span>{" "}
                         <a
-                          className="text-ember/90 hover:underline"
+                          className="text-wander/90 hover:underline"
                           href={expandedMergedDetails.ticketingUrl}
                           target="_blank"
                           rel="noreferrer"
@@ -829,7 +863,7 @@ export function TripPlannerClient() {
                       <p className="break-words">
                         <span className="text-parchment/50">Website:</span>{" "}
                         <a
-                          className="text-ember/90 hover:underline"
+                          className="text-wander/90 hover:underline"
                           href={expandedMergedDetails.website}
                           target="_blank"
                           rel="noreferrer"

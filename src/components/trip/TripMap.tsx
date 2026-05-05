@@ -7,7 +7,29 @@ import type mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import type { TripPlan, TripStop } from "@/lib/trip-schema";
 
+/** Match app theme (tailwind `wander` + coal/void) */
+const STYLE_URL = "mapbox://styles/mapbox/dark-v11";
+const ROUTE_CORE = "#34d399";
+const ROUTE_GLOW = "rgba(52, 211, 153, 0.45)";
+
 type ExtraMarker = { id: string; name: string; lat: number; lng: number; color?: string };
+
+function anchorLayerBelowLabels(map: mapboxgl.Map): string | undefined {
+  const layers = map.getStyle().layers;
+  if (!layers?.length) return undefined;
+  const prefer = [
+    "tunnel-minor-case",
+    "road-label-navigation",
+    "road-primary",
+    "road-secondary-tertiary",
+    "water",
+  ];
+  for (const id of prefer) {
+    if (map.getLayer(id)) return id;
+  }
+  const sym = layers.find((l) => l.type === "symbol");
+  return sym?.id ?? layers[layers.length - 1]?.id;
+}
 
 type Props = {
   mapboxToken: string;
@@ -127,8 +149,37 @@ export function TripMap({
       /* ignore unsupported env */
     }
 
-    /** Add 3D buildings from composite vector tiles (shows up when zoomed in). */
+    /** Add 3D buildings — charcoal + subtle wander edge (fits dark-v11). */
     if (!map.getSource("composite")) return;
+    const beforeId = anchorLayerBelowLabels(map);
+    const extrusionPaint: mapboxgl.FillExtrusionPaint = {
+      "fill-extrusion-color": [
+        "interpolate",
+        ["linear"],
+        ["get", "height"],
+        0,
+        "#252a28",
+        40,
+        "#2f3d36",
+        120,
+        "#3d5248",
+        260,
+        "#2a332f",
+      ],
+      "fill-extrusion-height": [
+        "interpolate",
+        ["linear"],
+        ["zoom"],
+        14,
+        0,
+        15,
+        ["get", "height"],
+      ],
+      "fill-extrusion-base": ["get", "min_height"],
+      "fill-extrusion-opacity": 0.62,
+      "fill-extrusion-ambient-occlusion-intensity": 0.22,
+      "fill-extrusion-emissive-strength": 0.02,
+    };
     try {
       if (!map.getLayer("3d-buildings")) {
         map.addLayer(
@@ -139,39 +190,12 @@ export function TripMap({
             filter: ["==", ["get", "extrude"], "true"],
             type: "fill-extrusion",
             minzoom: 14,
-            paint: {
-              "fill-extrusion-color": [
-                "interpolate",
-                ["linear"],
-                ["get", "height"],
-                0,
-                "#cbd5e1",
-                60,
-                "#94a3b8",
-                200,
-                "#64748b",
-              ],
-              "fill-extrusion-height": [
-                "interpolate",
-                ["linear"],
-                ["zoom"],
-                14,
-                0,
-                15,
-                ["get", "height"],
-              ],
-              "fill-extrusion-base": ["get", "min_height"],
-              // Keep buildings readable without dimming streets/labels underneath.
-              "fill-extrusion-opacity": 0.55,
-              "fill-extrusion-ambient-occlusion-intensity": 0.12,
-              "fill-extrusion-emissive-strength": 0,
-            },
+            paint: extrusionPaint,
           },
-          "tunnel-minor-case",
+          beforeId,
         );
       }
     } catch {
-      // style may not have tunnel-minor-case; fallback without insertion order
       try {
         if (!map.getLayer("3d-buildings")) {
           map.addLayer({
@@ -182,17 +206,13 @@ export function TripMap({
             type: "fill-extrusion",
             minzoom: 14,
             paint: {
-              "fill-extrusion-color": "#94a3b8",
+              ...extrusionPaint,
               "fill-extrusion-height": ["get", "height"],
-              "fill-extrusion-base": ["get", "min_height"],
-              "fill-extrusion-opacity": 0.52,
-              "fill-extrusion-ambient-occlusion-intensity": 0.12,
-              "fill-extrusion-emissive-strength": 0,
             },
           });
         }
       } catch {
-        /* composite layer differs by style/version */
+        /* composite differs by style/version */
       }
     }
   }, []);
@@ -205,10 +225,10 @@ export function TripMap({
 
   if (!mapboxToken) {
     return (
-      <div className="flex h-full min-h-[400px] items-center justify-center rounded-2xl border border-amber-500/30 bg-black/50 p-6 text-center text-sm text-parchment/80">
-        Add <code className="text-ember">NEXT_PUBLIC_MAPBOX_TOKEN</code> to <code className="text-ember">.env</code> (your
+      <div className="flex h-full min-h-[400px] items-center justify-center rounded-2xl border border-white/15 bg-black/50 p-6 text-center text-sm text-parchment/80">
+        Add <code className="text-wander">NEXT_PUBLIC_MAPBOX_TOKEN</code> to <code className="text-wander">.env</code> (your
         default <strong>public</strong> token from{" "}
-        <a className="text-ember underline" href="https://account.mapbox.com/">
+        <a className="text-wander underline" href="https://account.mapbox.com/">
           Mapbox
         </a>
         ) to show the 3D map.
@@ -217,12 +237,12 @@ export function TripMap({
   }
 
   return (
-    <div className="h-full w-full min-h-[360px]">
+    <div className="trip-map-shell relative h-full w-full min-h-[360px] overflow-hidden rounded-[inherit]">
       <Map
         ref={mapRef}
         mapboxAccessToken={mapboxToken}
         initialViewState={initialView}
-        mapStyle="mapbox://styles/mapbox/streets-v12"
+        mapStyle={STYLE_URL}
         style={{ width: "100%", height: "100%" }}
         interactiveLayerIds={[]}
         reuseMaps
@@ -232,18 +252,30 @@ export function TripMap({
         {routeFeature && (
           <Source id="route" type="geojson" data={routeFeature}>
             <Layer
+              id="route-line-glow"
+              type="line"
+              layout={{ "line-cap": "round", "line-join": "round" }}
+              paint={{
+                "line-color": ROUTE_GLOW,
+                "line-width": 12,
+                "line-blur": 3,
+                "line-opacity": 0.55,
+              }}
+            />
+            <Layer
               id="route-line"
               type="line"
+              layout={{ "line-cap": "round", "line-join": "round" }}
               paint={{
-                "line-color": "#f97316",
+                "line-color": ROUTE_CORE,
                 "line-width": 4,
-                "line-opacity": 0.9,
+                "line-opacity": 0.95,
               }}
             />
           </Source>
         )}
         {unresolvedCount > 0 && (
-          <div className="absolute bottom-3 right-3 z-10 max-w-[220px] rounded-lg border border-amber-500/30 bg-black/80 px-2.5 py-1.5 text-[10px] text-amber-200/90">
+          <div className="absolute bottom-3 right-3 z-10 max-w-[220px] rounded-lg border border-white/20 bg-black/80 px-2.5 py-1.5 text-[10px] text-parchment/70">
             {unresolvedCount} {unresolvedCount === 1 ? "stop" : "stops"} with no map pin (place could not be matched in this
             area).
           </div>
@@ -268,10 +300,10 @@ export function TripMap({
                 type="button"
                 className={`flex h-8 w-8 items-center justify-center rounded-full border-2 text-xs font-bold shadow-[0_10px_25px_rgba(0,0,0,0.55)] transition ${
                   selectedStopId === s.id
-                    ? "border-ember bg-ember text-white"
-                    : "border-white bg-slate-950 text-white hover:border-ember"
+                    ? "border-wander bg-wander text-void"
+                    : "border-white bg-slate-950 text-white hover:border-wander"
                 } ${
-                  s.locationConfidence != null && s.locationConfidence < 0.6 ? "ring-2 ring-amber-500/60" : ""
+                  s.locationConfidence != null && s.locationConfidence < 0.6 ? "ring-2 ring-white/40" : ""
                 }`}
                 aria-label={s.name}
               >
@@ -291,8 +323,8 @@ export function TripMap({
             style={{ zIndex: 10000 }}
           >
             <span
-              className="block h-2.5 w-2.5 rounded-full border border-white shadow"
-              style={{ background: m.color ?? "#60a5fa" }}
+              className="block h-2.5 w-2.5 rounded-full border border-white/30 shadow-[0_0_10px_rgba(52,211,153,0.35)]"
+              style={{ background: m.color ?? "rgba(52, 211, 153, 0.85)" }}
               title={m.name}
             />
           </Marker>

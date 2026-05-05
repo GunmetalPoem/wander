@@ -38,7 +38,7 @@ export function TripSummary({ plan, weather, activeDay, totalWalkMinutes, totalD
       <div className="grid grid-cols-2 gap-2 border-t border-white/5 pt-2">
         <div>
           <p className="text-parchment/50">Stops (today)</p>
-          <p className="text-lg font-serif text-ember/95">{stopCount}</p>
+          <p className="text-lg font-serif text-wander/95">{stopCount}</p>
         </div>
         <div>
           <p className="text-parchment/50">Route (today)</p>

@@ -3,9 +3,9 @@ import Link from "next/link";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Wander — trip planner & quests",
+  title: "Wander — trip planner",
   description:
-    "Wander: AI itineraries with Mapbox, routing, city confirmation, and a quest feed with Lab tools.",
+    "Wander: AI itineraries with Mapbox, routing, and city confirmation.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -21,12 +21,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <Link href="/" className="transition hover:text-parchment">
                 Planner
               </Link>
-              <Link href="/lore" className="transition hover:text-parchment">
-                Quest feed
-              </Link>
-              <Link href="/admin" className="transition hover:text-parchment">
-                Lab
-              </Link>
             </nav>
           </div>
         </header>
@@ -34,8 +28,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <footer className="border-t border-white/[0.06] bg-coal/80 py-6 text-xs text-mist">
           <div className="mx-auto max-w-[1600px] px-4">
             Mapbox © Mapbox, OpenStreetMap. Routing is indicative; check traffic and closures. AI steps may be wrong—verify
-            every stop. <Link href="/lore" className="text-ember/90 hover:underline">Quest feed</Link> (URL{" "}
-            <code className="text-parchment/70">/lore</code>).
+            every stop.
           </div>
         </footer>
       </body>

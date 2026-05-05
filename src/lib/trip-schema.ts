@@ -335,6 +335,8 @@ export type TripFormInput = {
   pace: (typeof paceOptions)[number];
   vibes: (typeof vibeOptions)[number][];
   mustInclude: string;
+  /** Semicolon-separated place names to never include (manual deletes + chat patch). Sent to the planner API. */
+  mustExclude: string;
   transport: "walking" | "driving";
   /** Optional trip start date (YYYY-MM-DD) used for weather-aware planning. */
   tripDate: string;
@@ -356,6 +358,7 @@ export const defaultTripForm: TripFormInput = {
   pace: "balanced",
   vibes: ["foodie", "outdoors"],
   mustInclude: "",
+  mustExclude: "",
   transport: "walking",
   tripDate: "",
   accessibility: {

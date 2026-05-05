@@ -26,6 +26,7 @@ const BodySchema = z.object({
       pace: z.string().optional(),
       vibes: z.array(z.string()).optional(),
       mustInclude: z.string().optional(),
+      mustExclude: z.string().optional(),
       transport: z.string().optional(),
       tripDate: z.string().optional(),
       accessibility: z
@@ -51,6 +52,7 @@ const ReplySchema = z.object({
       pace: z.enum(["packed", "balanced", "relaxed"]).optional(),
       vibes: z.array(z.string()).optional(),
       mustInclude: z.string().optional(),
+      mustExclude: z.string().optional(),
       transport: z.enum(["walking", "driving"]).optional(),
       tripDate: z.string().optional(),
       accessibility: z
@@ -75,7 +77,9 @@ You MUST respond with a single JSON object only (no markdown, no code fences), s
 
 "patch" (when you infer values) may include: city (string), days (1-14), groupSize (1-50), budgetAmount (0-100000 per day USD), pace packed|balanced|relaxed,
 vibes from: foodie, history, nightlife, outdoors, art, hidden_gems, family, photography,
-mustInclude (string), transport walking|driving, tripDate YYYY-MM-DD, accessibility { wheelchair, lowWalking, restStops }.
+mustInclude (string), mustExclude (string; semicolon-separated venue names the user removed or refuses — merged into trip prefs for the next rebuild),
+transport walking|driving, tripDate YYYY-MM-DD, accessibility { wheelchair, lowWalking, restStops }.
+When the user removes a stop, drops/skips a named place, or says "no X", add X to mustExclude so the next itinerary omits it.
 
 CRITICAL — latest user message wins (corrections):
 - You will receive a duplicated "HIGHEST PRIORITY" block with the user's **last** message. That message OVERRIDES the saved draft and earlier assistant turns for purposes of "patch" and your summary in "reply".
@@ -114,6 +118,7 @@ function draftSummary(d: TripFormInput | undefined): string {
       pace: d.pace,
       vibes: d.vibes,
       mustInclude: d.mustInclude || undefined,
+      mustExclude: d.mustExclude || undefined,
       transport: d.transport,
       tripDate: d.tripDate || undefined,
       accessibility: d.accessibility,
@@ -153,7 +158,7 @@ export async function POST(req: Request) {
   }
 
   const existingPlanNote = hasExistingPlan
-    ? "\n\nCONTEXT: An itinerary is ALREADY shown on the map. The user is refining it in chat. When their requests warrant a new plan (new days, city, pace, budget, major vibe change, or they say to refresh/rebuild), set readyToPlan true with a full patch — the client will regenerate the map automatically. For tiny wording-only tweaks, readyToPlan may stay false."
+    ? "\n\nCONTEXT: An itinerary is ALREADY shown on the map. The user is refining it in chat. The saved draft may include mustExclude (venues they deleted in the UI or asked to skip) — honor those on the next rebuild. When their requests warrant a new plan (new days, city, pace, budget, major vibe change, removing stops by name, or they say to refresh/rebuild), set readyToPlan true with a full patch — the client will regenerate the map automatically. For tiny wording-only tweaks, readyToPlan may stay false."
     : "\n\nThe client can auto-regenerate the map when you set readyToPlan true (after city is confirmed). The user can also tap Build / Update next to Send. If cityLocationReady is false, still set patch.city from the conversation.";
 
   const draftBlock = `Current saved trip preferences (merge patches into this):\n${draftSummary(draft as TripFormInput | undefined)}${existingPlanNote}`;
@@ -191,9 +196,9 @@ export async function POST(req: Request) {
   } else if (openaiKey) {
     const client = new OpenAI({ apiKey: openaiKey });
     const completion = await client.chat.completions.create({
-      model: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
+      model: process.env.OPENAI_MODEL ?? "gpt-5.4",
       temperature: 0.5,
-      max_tokens: 2048,
+      max_completion_tokens: 2048,
       response_format: { type: "json_object" },
       messages: [
         { role: "system", content: CHAT_SYSTEM },
