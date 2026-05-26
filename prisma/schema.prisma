@@ -7,34 +7,62 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model Quest {
-  id          String   @id @default(cuid())
-  slug        String   @unique
-  title       String
-  loreBlurb   String
-  description String
-  steps       String   @default("[]") // JSON string: string[]
-  locationName String?
-  lat         Float?
-  lng         Float?
-  difficulty  Int      // 1–5
-  safetyScore Int      // 1–5 (higher = more risk)
-  warnings    String   @default("[]") // JSON string: string[]
-  category    String   // tradition | urban_exploration | social | history | challenge
-  status      String   @default("draft") // draft | published
-  confidence  Float?
-  sourceUrl   String?
-  rawScrapeId String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+model TripRoom {
+  id                String   @id @default(cuid())
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  expiresAt         DateTime
+  unifiedDraftJson  String
+  planJson          String?
+  planWeatherJson   String?
+  planBuiltAt       DateTime?
+  planBuildLockAt   DateTime?
+  planBuildLockBy   String?
 
-  rawScrape RawScrape? @relation(fields: [rawScrapeId], references: [id], onDelete: SetNull)
+  participants RoomParticipant[]
+  messages     RoomMessage[]
+  preferences  ParticipantPreferences[]
 }
 
-model RawScrape {
-  id        String   @id @default(cuid())
-  url       String
-  rawText   String
-  createdAt DateTime @default(now())
-  quests    Quest[]
+model RoomParticipant {
+  id          String   @id @default(cuid())
+  roomId      String
+  cookieId    String
+  displayName String
+  colorHex    String
+  joinedAt    DateTime @default(now())
+  lastSeenAt  DateTime @default(now())
+
+  room        TripRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@unique([roomId, cookieId])
+  @@index([roomId])
+}
+
+model RoomMessage {
+  id              String    @id @default(cuid())
+  roomId          String
+  participantId   String?
+  role            String
+  content         String
+  createdAt       DateTime  @default(now())
+  aiProcessingAt  DateTime?
+  aiProcessedAt   DateTime?
+
+  room            TripRoom  @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@index([roomId, createdAt])
+  @@index([roomId, aiProcessedAt])
+}
+
+model ParticipantPreferences {
+  id            String   @id @default(cuid())
+  roomId        String
+  participantId String   @unique
+  prefsJson     String
+  updatedAt     DateTime @updatedAt
+
+  room          TripRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@index([roomId])
 }

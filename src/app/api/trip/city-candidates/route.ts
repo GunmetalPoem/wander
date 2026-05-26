@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { getGoogleGeoKeyFromEnv } from "@/lib/trip-geocode";
 import type { CityCandidate } from "@/lib/trip-city";
 
+export const revalidate = 300;
+
 function padId(s: string, i: number) {
   return `c_${i}_${s.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 40)}`;
 }
@@ -9,7 +11,7 @@ function padId(s: string, i: number) {
 async function mapboxCityCandidates(q: string, token: string): Promise<CityCandidate[]> {
   const path = encodeURIComponent(q.slice(0, 200));
   const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${path}.json?types=place%2Clocality&limit=8&autocomplete=true&access_token=${encodeURIComponent(token)}`;
-  const res = await fetch(url, { next: { revalidate: 0 } });
+  const res = await fetch(url, { next: { revalidate: 300 } });
   if (!res.ok) return [];
   const j = (await res.json()) as {
     features?: Array<{
@@ -59,7 +61,9 @@ async function googleCityCandidates(q: string, key: string): Promise<CityCandida
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
-  const q = (searchParams.get("query") ?? searchParams.get("q") ?? "").trim();
+  const raw = searchParams.get("query") ?? searchParams.get("q") ?? "";
+  // Normalize so different casings/whitespace hit the same Next fetch-cache key.
+  const q = raw.trim().toLowerCase().replace(/\s+/g, " ");
   if (q.length < 2) {
     return NextResponse.json({ candidates: [] as CityCandidate[] });
   }

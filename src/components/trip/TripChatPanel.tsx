@@ -30,6 +30,9 @@ type Props = {
   buildHighlighted?: boolean;
   /** Start over: clear plan and chat (parent handles). */
   onNewTrip?: () => void;
+  /** Inline error message displayed above the textarea (e.g. send failure). */
+  sendError?: string | null;
+  onClearSendError?: () => void;
 };
 
 export function TripChatPanel({
@@ -44,6 +47,8 @@ export function TripChatPanel({
   buildLabel = "Build itinerary",
   buildHighlighted = false,
   onNewTrip,
+  sendError = null,
+  onClearSendError,
 }: Props) {
   const [draft, setDraft] = useState("");
   const listRef = useRef<HTMLDivElement>(null);
@@ -123,6 +128,22 @@ export function TripChatPanel({
         )}
       </div>
 
+      {sendError ? (
+        <div className="mb-2 flex items-start gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-[11px] text-red-200">
+          <span aria-hidden className="mt-0.5">!</span>
+          <p className="flex-1 leading-snug">{sendError}</p>
+          {onClearSendError ? (
+            <button
+              type="button"
+              onClick={onClearSendError}
+              className="ml-1 shrink-0 rounded px-1 text-red-200/70 hover:bg-red-500/20 hover:text-red-100"
+              aria-label="Dismiss error"
+            >
+              ×
+            </button>
+          ) : null}
+        </div>
+      ) : null}
       <div className="rounded-2xl border border-white/[0.08] bg-black/35 p-1 shadow-inner shadow-black/20">
         <div className="flex items-center justify-between gap-2 border-b border-white/[0.06] px-2.5 py-1.5">
           <p className="flex min-w-0 flex-1 items-center gap-1.5 text-[10px] text-parchment/45">

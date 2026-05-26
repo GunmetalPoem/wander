@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   defaultTripForm,
@@ -71,6 +72,8 @@ const WELCOME_MESSAGES: TripChatMessage[] = [
 ];
 
 export function TripPlannerClient() {
+  const router = useRouter();
+  const [creatingRoom, setCreatingRoom] = useState(false);
   const [form, setForm] = useState<TripFormInput>(defaultTripForm);
   const formRef = useRef(form);
   formRef.current = form;
@@ -469,6 +472,25 @@ export function TripPlannerClient() {
     [runPlanFromForm, plan, buildItinerary],
   );
 
+  const shareWithGroup = useCallback(async () => {
+    if (creatingRoom) return;
+    setCreatingRoom(true);
+    setErr(null);
+    try {
+      const res = await fetch("/api/trip/room", { method: "POST" });
+      if (!res.ok) {
+        setErr("Could not create group room. Try again.");
+        return;
+      }
+      const j = (await res.json()) as { id: string; joinUrl: string };
+      router.push(j.joinUrl);
+    } catch {
+      setErr("Network error creating group room.");
+    } finally {
+      setCreatingRoom(false);
+    }
+  }, [creatingRoom, router]);
+
   const startFreshTrip = useCallback(() => {
     setPlan(null);
     setWeather(null);
@@ -573,6 +595,21 @@ export function TripPlannerClient() {
         }`}
       >
         <div className="relative z-10 rounded-3xl border border-white/[0.08] bg-black/35 p-4 shadow-xl shadow-black/30">
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1 rounded-full border border-white/10 bg-black/40 p-1 text-[11px]">
+              <span className="rounded-full bg-wander px-3 py-1 font-semibold text-ink">Solo</span>
+              <button
+                type="button"
+                onClick={() => void shareWithGroup()}
+                disabled={creatingRoom}
+                className="rounded-full px-3 py-1 text-parchment/60 hover:text-parchment disabled:opacity-50"
+                title="Create a group trip room and invite friends"
+              >
+                {creatingRoom ? "Creating…" : "Group"}
+              </button>
+            </div>
+            <span className="text-[10px] text-parchment/40">Plan together with a shared link</span>
+          </div>
           <TripChatPanel
             messages={chatMessages}
             onSend={handleChatSend}
@@ -585,6 +622,8 @@ export function TripPlannerClient() {
             buildLabel={buildLabel}
             buildHighlighted={buildHighlighted}
             onNewTrip={startFreshTrip}
+            sendError={err}
+            onClearSendError={() => setErr(null)}
           />
 
           <div className="mt-3 border-t border-white/[0.06] pt-3">
