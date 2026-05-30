@@ -18,7 +18,9 @@ import { TripSummary } from "./TripSummary";
 import { CityConfirmField } from "./CityConfirmField";
 import { TripChatPanel, type TripChatMessage } from "./TripChatPanel";
 import type { TripWeather } from "@/lib/weather";
-import type { TripStop } from "@/lib/trip-schema";
+import type { TripDay, TripStop } from "@/lib/trip-schema";
+import { readNdjsonStream } from "@/lib/ndjson-stream";
+import type { PlanStreamEvent } from "@/lib/trip-plan-service";
 import { AnimatePresence, easeOutQuart, motion, useReducedMotion } from "@/components/ui/Motion";
 import Modal from "@/components/ui/Modal";
 import Drawer from "@/components/ui/Drawer";
@@ -346,6 +348,49 @@ export function TripPlannerClient() {
   const runPlanFromForm = useCallback(async (f: TripFormInput) => {
     setErr(null);
     setBusy(true);
+    // Reset to a clean slate for the new build; streaming events fill it in.
+    setPlan(null);
+    setWeather(null);
+    setRouteFeature(null);
+    setLegs([]);
+    setNearby([]);
+
+    type StopPatch = Partial<TripStop> & { id: string };
+
+    const draftRef: {
+      city: string;
+      cityCenter?: { lat: number; lng: number };
+      days: Map<number, TripDay>;
+    } = {
+      city: f.city,
+      cityCenter: f.cityCenter ?? undefined,
+      days: new Map(),
+    };
+
+    const commitDraft = () => {
+      if (draftRef.days.size === 0) return;
+      const ordered = [...draftRef.days.values()].sort((a, b) => a.day - b.day);
+      setPlan({
+        trip: {
+          city: draftRef.city,
+          city_center: draftRef.cityCenter,
+          days: ordered,
+        },
+      } as TripPlan);
+    };
+
+    const applyStopPatches = (dayNum: number, patches: StopPatch[]) => {
+      const d = draftRef.days.get(dayNum);
+      if (!d) return;
+      const byId = new Map(patches.map((p) => [p.id, p] as const));
+      const nextStops = d.stops.map((s) => {
+        const patch = byId.get(s.id);
+        return patch ? ({ ...s, ...patch, details: { ...(s.details ?? {}), ...(patch.details ?? {}) } } as TripStop) : s;
+      });
+      draftRef.days.set(dayNum, { ...d, stops: nextStops });
+      commitDraft();
+    };
+
     try {
       const res = await fetch("/api/trip/plan", {
         method: "POST",
@@ -365,18 +410,73 @@ export function TripPlannerClient() {
           accessibility: f.accessibility,
         }),
       });
-      const data = (await res.json()) as { error?: string; plan?: TripPlan; weather?: TripWeather | null };
-      if (!res.ok) {
-        setErr(data.error ?? "Plan failed");
+      const ctype = res.headers.get("content-type") ?? "";
+      if (!res.ok && !ctype.includes("ndjson")) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        setErr(data.error ?? `Plan failed (${res.status})`);
         return;
       }
-      if (data.plan) {
-        setPlan(data.plan);
-        setWeather(data.weather ?? null);
-        setActiveDay(1);
-        setSelectedStopId(data.plan.trip.days[0]?.stops[0]?.id ?? null);
-        setItinerarySuggested(false);
-        setAwaitingCityForPlan(false);
+      if (!ctype.includes("ndjson")) {
+        // Backwards-compat fallback (older deploy returning one-shot JSON).
+        const data = (await res.json()) as { plan?: TripPlan; weather?: TripWeather | null; error?: string };
+        if (data.error) {
+          setErr(data.error);
+          return;
+        }
+        if (data.plan) {
+          setPlan(data.plan);
+          setWeather(data.weather ?? null);
+          setActiveDay(1);
+          setSelectedStopId(data.plan.trip.days[0]?.stops[0]?.id ?? null);
+          setItinerarySuggested(false);
+          setAwaitingCityForPlan(false);
+        }
+        return;
+      }
+
+      for await (const evUnknown of readNdjsonStream(res)) {
+        const ev = evUnknown as PlanStreamEvent;
+        switch (ev.type) {
+          case "started":
+            break;
+          case "city":
+            draftRef.city = ev.city ?? draftRef.city;
+            if (ev.city_center) draftRef.cityCenter = ev.city_center;
+            commitDraft();
+            break;
+          case "day": {
+            draftRef.days.set(ev.day.day, ev.day);
+            commitDraft();
+            // Auto-focus first day + first stop the moment it arrives.
+            if (draftRef.days.size === 1) {
+              setActiveDay(ev.day.day);
+              setSelectedStopId(ev.day.stops[0]?.id ?? null);
+              setItinerarySuggested(false);
+              setAwaitingCityForPlan(false);
+            }
+            break;
+          }
+          case "stops_located":
+            applyStopPatches(ev.day, ev.stops as StopPatch[]);
+            break;
+          case "stops_enriched":
+            applyStopPatches(ev.day, ev.stops as StopPatch[]);
+            break;
+          case "weather":
+            setWeather(ev.weather ?? null);
+            break;
+          case "complete":
+            // Canonical final plan — replaces our optimistic state.
+            setPlan(ev.plan);
+            setActiveDay(1);
+            setSelectedStopId(ev.plan.trip.days[0]?.stops[0]?.id ?? null);
+            setItinerarySuggested(false);
+            setAwaitingCityForPlan(false);
+            break;
+          case "error":
+            setErr(ev.error || "Plan failed");
+            break;
+        }
       }
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Request failed");

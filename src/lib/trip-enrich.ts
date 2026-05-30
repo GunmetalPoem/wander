@@ -119,27 +119,31 @@ function applyOsmDetails(stop: TripStop, el: OverpassElement): TripStop {
 }
 
 /**
+ * Best-effort Overpass enrichment for a subset of stops (e.g. one day).
+ * Used by the streaming pipeline to enrich as each day's stops finish geocoding.
+ */
+export async function enrichStops(stops: readonly TripStop[]): Promise<TripStop[]> {
+  return mapWithConcurrencyLimit(stops, OVERPASS_ENRICH_CONCURRENCY, async (s) => {
+    const c = stopCenter(s);
+    if (!c) return s;
+    try {
+      const els = await overpassLookupNearby(c.lat, c.lng, 140);
+      const best = pickBestElement(s, els);
+      return best ? applyOsmDetails(s, best) : s;
+    } catch {
+      return s;
+    }
+  });
+}
+
+/**
  * Best-effort enrichment using OpenStreetMap tags via Overpass.
  * Adds cuisine/opening_hours/wheelchair/website/phone when available.
  */
 export async function enrichTripPlan(plan: TripPlan): Promise<TripPlan> {
   const days = [];
   for (const d of plan.trip.days) {
-    const stops = await mapWithConcurrencyLimit(
-      d.stops,
-      OVERPASS_ENRICH_CONCURRENCY,
-      async (s) => {
-        const c = stopCenter(s);
-        if (!c) return s;
-        try {
-          const els = await overpassLookupNearby(c.lat, c.lng, 140);
-          const best = pickBestElement(s, els);
-          return best ? applyOsmDetails(s, best) : s;
-        } catch {
-          return s;
-        }
-      },
-    );
+    const stops = await enrichStops(d.stops);
     days.push({ ...d, stops });
   }
   return { ...plan, trip: { ...plan.trip, days } };

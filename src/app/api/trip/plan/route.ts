@@ -1,6 +1,5 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
-import { isPlanTripError, planTrip, tripFormFromPartial } from "@/lib/trip-plan-service";
+import { planTripStream, tripFormFromPartial, type PlanStreamEvent } from "@/lib/trip-plan-service";
 
 export const maxDuration = 120;
 
@@ -25,28 +24,69 @@ const RequestBodySchema = z.object({
     .optional(),
 });
 
+function jsonResponse(status: number, body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
+
 export async function POST(req: Request) {
   let body: unknown;
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+    return jsonResponse(400, { error: "Invalid JSON" });
   }
   const parsed = RequestBodySchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json({ error: "Invalid request", details: parsed.error.flatten() }, { status: 400 });
+    return jsonResponse(400, { error: "Invalid request", details: parsed.error.flatten() });
   }
 
   const input = tripFormFromPartial(parsed.data);
+  const encoder = new TextEncoder();
 
-  try {
-    const { plan, weather, provider, warnings } = await planTrip(input);
-    return NextResponse.json({ plan, provider, weather, warnings });
-  } catch (e) {
-    if (isPlanTripError(e)) {
-      const body = e.details ? { error: e.error, ...(e.details as object) } : { error: e.error };
-      return NextResponse.json(body, { status: e.status });
-    }
-    return NextResponse.json({ error: "Plan failed" }, { status: 500 });
-  }
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      let closed = false;
+      const writeLine = (ev: PlanStreamEvent) => {
+        if (closed) return;
+        try {
+          controller.enqueue(encoder.encode(JSON.stringify(ev) + "\n"));
+        } catch {
+          // controller already closed by the client disconnecting
+          closed = true;
+        }
+      };
+
+      try {
+        await planTripStream(input, writeLine);
+      } catch (e) {
+        writeLine({
+          type: "error",
+          status: 500,
+          error: e instanceof Error ? e.message : "Plan failed",
+        });
+      } finally {
+        if (!closed) {
+          closed = true;
+          try {
+            controller.close();
+          } catch {
+            // already closed
+          }
+        }
+      }
+    },
+  });
+
+  return new Response(stream, {
+    status: 200,
+    headers: {
+      "content-type": "application/x-ndjson; charset=utf-8",
+      // Disable proxy buffering so each NDJSON line reaches the client immediately.
+      "cache-control": "no-store, no-transform",
+      "x-accel-buffering": "no",
+    },
+  });
 }

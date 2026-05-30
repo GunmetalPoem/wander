@@ -5,8 +5,13 @@ import { mapWithConcurrencyLimit } from "@/lib/map-with-concurrency";
 type Center = { lat: number; lng: number };
 
 /** Mapbox name-match threshold. */
-/** Parallel stop resolves — bounded to avoid bursting provider rate limits */
-const STOP_GEOCODE_CONCURRENCY = 8;
+/** Parallel stop resolves — bounded to avoid bursting provider rate limits.
+ * Default raised to 16: well under Google Places Text Search (~50 QPS on paid
+ * plans) and Mapbox Search Box quotas. Override via STOP_GEOCODE_CONCURRENCY. */
+const STOP_GEOCODE_CONCURRENCY = (() => {
+  const env = Number(process.env.STOP_GEOCODE_CONCURRENCY);
+  return Number.isFinite(env) && env > 0 ? Math.min(32, Math.floor(env)) : 16;
+})();
 
 const MAPBOX_MIN_CONF = 0.4;
 /**
@@ -244,45 +249,6 @@ type GoogleResult = {
   priceLevel?: number;
 };
 
-type GooglePlaceDetails = {
-  website?: string;
-  formatted_phone_number?: string;
-  international_phone_number?: string;
-  opening_hours?: { weekday_text?: string[] };
-  price_level?: number;
-  types?: string[];
-  wheelchair_accessible_entrance?: boolean;
-  url?: string;
-};
-
-async function googlePlaceDetails(placeId: string, key: string): Promise<GooglePlaceDetails | null> {
-  const u = new URL("https://maps.googleapis.com/maps/api/place/details/json");
-  u.searchParams.set(
-    "fields",
-    [
-      "website",
-      "formatted_phone_number",
-      "international_phone_number",
-      "opening_hours/weekday_text",
-      "price_level",
-      "types",
-      "wheelchair_accessible_entrance",
-      "url",
-    ].join(","),
-  );
-  u.searchParams.set("place_id", placeId);
-  u.searchParams.set("key", key);
-  const res = await fetch(u.toString(), { next: { revalidate: 0 } });
-  if (!res.ok) return null;
-  const j = (await res.json()) as { status: string; error_message?: string; result?: GooglePlaceDetails };
-  if (j.status === "REQUEST_DENIED" || j.status === "INVALID_REQUEST") {
-    console.error("[trip-geocode] Google Place Details:", j.status, j.error_message);
-    return null;
-  }
-  if (j.status !== "OK" || !j.result) return null;
-  return j.result;
-}
-
 /**
  * Text Search (legacy) with optional location+radius biasing to the trip city.
  */
@@ -475,8 +441,8 @@ async function tryGoogleResolve(
         cands.length,
       )
     ) {
-      const details =
-        picked.result.placeId != null ? await googlePlaceDetails(picked.result.placeId, googleKey) : null;
+      // Skip the per-stop Place Details fetch on the build path — the stop
+      // drawer lazy-loads it through /api/trip/stop-details. Saves ~1-2s.
       return {
         ...stop,
         lat: picked.result.lat,
@@ -489,12 +455,8 @@ async function tryGoogleResolve(
           ...(stop.details ?? {}),
           provider: "google",
           placeId: picked.result.placeId,
-          types: details?.types ?? picked.result.types,
-          priceLevel: details?.price_level ?? picked.result.priceLevel,
-          openingHoursText: details?.opening_hours?.weekday_text,
-          website: details?.website ?? (details?.url && details.url.startsWith("http") ? details.url : undefined),
-          phone: details?.international_phone_number ?? details?.formatted_phone_number,
-          wheelchairAccessibleEntrance: details?.wheelchair_accessible_entrance,
+          types: picked.result.types,
+          priceLevel: picked.result.priceLevel,
         },
       };
     }
@@ -522,7 +484,7 @@ async function tryGoogleResolve(
     const sim = nameSimilarity(stop.name, c.name);
     const dKm = haversineKm(cityCenter, { lat: c.lat, lng: c.lng });
     if (sim >= GOOGLE_MIN_CONF || (dKm < 50 && sim >= 0.18)) {
-      const details = c.placeId != null ? await googlePlaceDetails(c.placeId, googleKey) : null;
+      // Skip Place Details on the build path — drawer lazy-loads via /api/trip/stop-details.
       return {
         ...stop,
         lat: c.lat,
@@ -535,12 +497,8 @@ async function tryGoogleResolve(
           ...(stop.details ?? {}),
           provider: "google",
           placeId: c.placeId,
-          types: details?.types ?? c.types,
-          priceLevel: details?.price_level ?? c.priceLevel,
-          openingHoursText: details?.opening_hours?.weekday_text,
-          website: details?.website ?? (details?.url && details.url.startsWith("http") ? details.url : undefined),
-          phone: details?.international_phone_number ?? details?.formatted_phone_number,
-          wheelchairAccessibleEntrance: details?.wheelchair_accessible_entrance,
+          types: c.types,
+          priceLevel: c.priceLevel,
         },
       };
     }
@@ -550,132 +508,176 @@ async function tryGoogleResolve(
 }
 
 /**
- * Fills `city_center` when missing, then resolves each stop.
- * When `GOOGLE_*` is set, **Google Places is tried first** (Text Search + Find Place, biased to the city).
- * Mapbox Search Box is a fallback if Mapbox token is set.
- * City geocoding uses Mapbox when available, otherwise Google Geocoding.
+ * The pre-resolved city geometry + bias context used to bias per-stop searches.
+ * Build once with `resolveCityContext()`, then reuse for every batch of stops.
  */
-export async function refineTripPlanWithMapbox(
-  plan: TripPlan,
+export type ResolvedCityContext = {
+  ctx: CityContext;
+  center: Center;
+  geo: {
+    center: Center;
+    bbox: [number, number, number, number] | null;
+    countryCode: string | undefined;
+  } | null;
+  /** Final city_center to write back onto the TripPlan when complete. */
+  setCenter: { lat: number; lng: number } | undefined;
+};
+
+/**
+ * Resolve the city's center + bbox + country code, biased to the user's
+ * confirmed pick if one was provided. Safe to call once and reuse across
+ * day-by-day stop geocoding.
+ */
+export async function resolveCityContext(
   city: string,
   mapboxToken: string | null,
-  googleKey: string | undefined = getGoogleGeoKeyFromEnv(),
-  /** When the user picked a place in the UI, use this for bias/bbox and final map center (avoids same-name cities). */
+  googleKey: string | undefined,
   confirmedCityCenter?: { lat: number; lng: number } | null,
-): Promise<TripPlan> {
+  fromPlanCenter?: { lat: number; lng: number } | null,
+): Promise<ResolvedCityContext | null> {
   const confirmed =
     confirmedCityCenter != null &&
     Number.isFinite(confirmedCityCenter.lat) &&
     Number.isFinite(confirmedCityCenter.lng) &&
     !(confirmedCityCenter.lat === 0 && confirmedCityCenter.lng === 0);
-  const geo: {
-    center: Center;
-    bbox: [number, number, number, number] | null;
-    countryCode: string | undefined;
-  } | null = confirmed
+  const geo = confirmed
     ? {
         center: { lat: confirmedCityCenter!.lat, lng: confirmedCityCenter!.lng },
         bbox: padBbox({ lat: confirmedCityCenter!.lat, lng: confirmedCityCenter!.lng }, 0.2),
-        countryCode: undefined,
+        countryCode: undefined as string | undefined,
       }
     : await resolveCityGeometry(city, mapboxToken, googleKey);
-  const fromPlan = plan.trip.city_center;
   const baseCenter: Center | null =
-    fromPlan && Number.isFinite(fromPlan.lat) && Number.isFinite(fromPlan.lng) && !(fromPlan.lat === 0 && fromPlan.lng === 0)
-      ? { lat: fromPlan.lat, lng: fromPlan.lng }
+    fromPlanCenter &&
+    Number.isFinite(fromPlanCenter.lat) &&
+    Number.isFinite(fromPlanCenter.lng) &&
+    !(fromPlanCenter.lat === 0 && fromPlanCenter.lng === 0)
+      ? { lat: fromPlanCenter.lat, lng: fromPlanCenter.lng }
       : null;
   const cityCenter: Center = geo?.center ?? baseCenter ?? { lat: 0, lng: 0 };
-  if (!geo && !baseCenter) {
-    return plan;
-  }
+  if (!geo && !baseCenter) return null;
   const bboxList = geo?.bbox ?? (baseCenter ? padBbox(baseCenter, 0.2) : null);
   const ctx: CityContext = {
     center: cityCenter,
     bbox: bboxString(bboxList ?? padBbox(cityCenter, 0.2)),
     country: geo?.countryCode ? geo.countryCode.toUpperCase() : undefined,
   };
+  const setCenter = confirmed
+    ? { lat: confirmedCityCenter!.lat, lng: confirmedCityCenter!.lng }
+    : fromPlanCenter ?? (geo ? { lat: geo.center.lat, lng: geo.center.lng } : undefined);
+  return { ctx, center: cityCenter, geo, setCenter };
+}
 
-  async function resolveOneStop(
-    stop: TripStop,
-    sCity: string,
-    center: Center,
-    mapbox: string | null,
-    gKey: string | undefined,
-  ): Promise<TripStop> {
-    if (!Number.isFinite(center.lat) || !Number.isFinite(center.lng) || (center.lat === 0 && center.lng === 0)) {
-      return { ...stop, lat: null, lng: null, locationResolved: false };
-    }
-
-    if (gKey) {
-      const g = await tryGoogleResolve(stop, sCity, center, gKey);
-      if (g) {
-        return g;
-      }
-    }
-
-    if (mapbox) {
-      const nameSimOnly = (feature: SearchBoxFeature) => nameSimilarity(stop.name, displayName(feature) || stop.name);
-      const queries = [`${stop.name} ${sCity}`.trim(), `${stop.name} ${stop.address} ${sCity}`.trim()];
-      let features: SearchBoxFeature[] = [];
-      for (const q of queries) {
-        if (!q.trim()) continue;
-        const [fPoi, fStreet] = await Promise.all([
-          mapboxSearchBoxForward(q, mapbox, ctx, "poi"),
-          mapboxSearchBoxForward(q, mapbox, ctx, "poi,address,street"),
-        ]);
-        const f = fPoi.length ? fPoi : fStreet;
-        if (f.length) {
-          features = f;
-          break;
-        }
-      }
-      if (features.length) {
-        const feature = pickBestFeature(features, stop, center);
-        if (feature) {
-          const rname = displayName(feature) || stop.name;
-          const conf = nameSimOnly(feature);
-          const [flng, flat] = feature.geometry.coordinates;
-          if (Number.isFinite(flat) && Number.isFinite(flng) && conf >= MAPBOX_MIN_CONF) {
-            return {
-              ...stop,
-              lat: flat,
-              lng: flng,
-              locationResolved: true,
-              locationConfidence: Math.min(1, conf),
-              resolvedName: rname,
-              resolvedAddress: feature.properties.full_address,
-            };
-          }
-        }
-      }
-    }
-
-    return {
-      ...stop,
-      lat: null,
-      lng: null,
-      locationResolved: false,
-      locationConfidence: 0,
-    };
+async function resolveOneStop(
+  stop: TripStop,
+  sCity: string,
+  ctx: CityContext,
+  mapbox: string | null,
+  gKey: string | undefined,
+): Promise<TripStop> {
+  const center = ctx.center;
+  if (!Number.isFinite(center.lat) || !Number.isFinite(center.lng) || (center.lat === 0 && center.lng === 0)) {
+    return { ...stop, lat: null, lng: null, locationResolved: false };
   }
+
+  if (gKey) {
+    const g = await tryGoogleResolve(stop, sCity, center, gKey);
+    if (g) return g;
+  }
+
+  if (mapbox) {
+    const nameSimOnly = (feature: SearchBoxFeature) =>
+      nameSimilarity(stop.name, displayName(feature) || stop.name);
+    const queries = [`${stop.name} ${sCity}`.trim(), `${stop.name} ${stop.address} ${sCity}`.trim()];
+    let features: SearchBoxFeature[] = [];
+    for (const q of queries) {
+      if (!q.trim()) continue;
+      const [fPoi, fStreet] = await Promise.all([
+        mapboxSearchBoxForward(q, mapbox, ctx, "poi"),
+        mapboxSearchBoxForward(q, mapbox, ctx, "poi,address,street"),
+      ]);
+      const f = fPoi.length ? fPoi : fStreet;
+      if (f.length) {
+        features = f;
+        break;
+      }
+    }
+    if (features.length) {
+      const feature = pickBestFeature(features, stop, center);
+      if (feature) {
+        const rname = displayName(feature) || stop.name;
+        const conf = nameSimOnly(feature);
+        const [flng, flat] = feature.geometry.coordinates;
+        if (Number.isFinite(flat) && Number.isFinite(flng) && conf >= MAPBOX_MIN_CONF) {
+          return {
+            ...stop,
+            lat: flat,
+            lng: flng,
+            locationResolved: true,
+            locationConfidence: Math.min(1, conf),
+            resolvedName: rname,
+            resolvedAddress: feature.properties.full_address,
+          };
+        }
+      }
+    }
+  }
+
+  return {
+    ...stop,
+    lat: null,
+    lng: null,
+    locationResolved: false,
+    locationConfidence: 0,
+  };
+}
+
+/**
+ * Geocode an arbitrary subset of stops (e.g. one day's worth) using a
+ * pre-resolved city context. Concurrency bounded by STOP_GEOCODE_CONCURRENCY.
+ */
+export async function geocodeStops(
+  stops: readonly TripStop[],
+  city: string,
+  cityCtx: ResolvedCityContext,
+  mapboxToken: string | null,
+  googleKey: string | undefined = getGoogleGeoKeyFromEnv(),
+): Promise<TripStop[]> {
+  return mapWithConcurrencyLimit(stops, STOP_GEOCODE_CONCURRENCY, (s) =>
+    resolveOneStop(s, city, cityCtx.ctx, mapboxToken, googleKey),
+  );
+}
+
+/**
+ * Fills `city_center` when missing, then resolves each stop.
+ * Kept as a one-shot wrapper for callers that don't stream (group room build).
+ */
+export async function refineTripPlanWithMapbox(
+  plan: TripPlan,
+  city: string,
+  mapboxToken: string | null,
+  googleKey: string | undefined = getGoogleGeoKeyFromEnv(),
+  confirmedCityCenter?: { lat: number; lng: number } | null,
+): Promise<TripPlan> {
+  const cityCtx = await resolveCityContext(
+    city,
+    mapboxToken,
+    googleKey,
+    confirmedCityCenter,
+    plan.trip.city_center ?? null,
+  );
+  if (!cityCtx) return plan;
 
   const days = [];
   for (const d of plan.trip.days) {
-    const stops = await mapWithConcurrencyLimit(
-      d.stops,
-      STOP_GEOCODE_CONCURRENCY,
-      (s) => resolveOneStop(s, city, cityCenter, mapboxToken, googleKey),
-    );
+    const stops = await geocodeStops(d.stops, city, cityCtx, mapboxToken, googleKey);
     days.push({ ...d, stops });
   }
-  const setCenter = confirmed
-    ? { lat: confirmedCityCenter!.lat, lng: confirmedCityCenter!.lng }
-    : (plan.trip.city_center ?? (geo ? { lat: geo.center.lat, lng: geo.center.lng } : undefined));
   return {
     ...plan,
     trip: {
       ...plan.trip,
-      city_center: setCenter,
+      city_center: cityCtx.setCenter,
       days,
     },
   };
