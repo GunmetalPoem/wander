@@ -15,6 +15,7 @@ import { CSS } from "@dnd-kit/utilities";
 import type { TripStop } from "@/lib/trip-schema";
 import type { ScheduledStop } from "@/lib/trip-time";
 import { mapboxStopThumbnailUrl } from "@/lib/mapbox-static-thumb";
+import { LayoutGroup, motion, useReducedMotion } from "@/components/ui/Motion";
 
 const AVATAR_PALETTES = [
   "bg-teal-950/85 text-teal-100 ring-1 ring-teal-400/20",
@@ -24,6 +25,40 @@ const AVATAR_PALETTES = [
   "bg-cyan-950/85 text-cyan-100 ring-1 ring-cyan-400/20",
   "bg-violet-950/85 text-violet-100 ring-1 ring-violet-400/20",
 ] as const;
+
+function DayPill({
+  day,
+  active,
+  onSelect,
+}: {
+  day: number;
+  active: boolean;
+  onSelect: () => void;
+}) {
+  const reduce = useReducedMotion();
+  return (
+    <motion.button
+      type="button"
+      onClick={onSelect}
+      whileTap={reduce ? undefined : { scale: 0.96 }}
+      transition={{ type: "spring", stiffness: 520, damping: 28 }}
+      className={`relative isolate rounded-full px-3 py-1 text-xs transition-colors ${
+        active ? "text-wander" : "text-parchment/75 hover:text-parchment"
+      }`}
+    >
+      {active ? (
+        <motion.span
+          layoutId="trip-day-active"
+          className="absolute inset-0 -z-10 rounded-full bg-wander/25 ring-1 ring-wander/35"
+          transition={{ type: "spring", stiffness: 520, damping: 36, mass: 0.7 }}
+        />
+      ) : (
+        <span className="absolute inset-0 -z-10 rounded-full bg-white/5" aria-hidden />
+      )}
+      Day {day}
+    </motion.button>
+  );
+}
 
 function stopInitials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -224,20 +259,18 @@ export function TripTimeline({
   return (
     <div className="flex flex-col gap-2">
       {dayNumbers.length > 1 && (
-        <div className="flex flex-wrap gap-1">
-          {dayNumbers.map((d) => (
-            <button
-              key={d}
-              type="button"
-              onClick={() => onDayChange(d)}
-              className={`rounded-full px-3 py-1 text-xs transition-colors ${
-                d === activeDay ? "bg-wander/25 text-wander ring-1 ring-wander/35" : "bg-white/5 text-parchment/75 hover:bg-white/10"
-              }`}
-            >
-              Day {d}
-            </button>
-          ))}
-        </div>
+        <LayoutGroup id="trip-timeline-days">
+          <div className="flex flex-wrap gap-1">
+            {dayNumbers.map((d) => (
+              <DayPill
+                key={d}
+                day={d}
+                active={d === activeDay}
+                onSelect={() => onDayChange(d)}
+              />
+            ))}
+          </div>
+        </LayoutGroup>
       )}
       {isRefreshing ? (
         <TimelineSkeleton count={skeletonCount} />

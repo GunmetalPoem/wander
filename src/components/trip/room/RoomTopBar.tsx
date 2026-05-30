@@ -1,6 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { WanderIcon } from "@/components/WanderIcon";
+import AvatarStack, { type AvatarItem } from "@/components/ui/AvatarStack";
+import Button from "@/components/ui/Button";
+import { motion } from "@/components/ui/Motion";
+import { useToast } from "@/components/ui/Toast";
 
 type Participant = {
   id: string;
@@ -24,66 +29,93 @@ function initials(name: string): string {
 
 export function RoomTopBar({ roomId, participants, meId }: Props) {
   const [copied, setCopied] = useState(false);
+  const toast = useToast();
   const now = Date.now();
+
+  const items = useMemo<AvatarItem[]>(
+    () =>
+      participants.map((p) => ({
+        id: p.id,
+        initials: initials(p.displayName),
+        color: p.colorHex,
+        label: p.displayName,
+        stale: now - p.lastSeenAt > 5 * 60 * 1000,
+        isSelf: p.id === meId,
+      })),
+    [participants, meId, now],
+  );
 
   async function copyLink() {
     const url = typeof window !== "undefined" ? `${window.location.origin}/trip/room/${roomId}` : "";
     try {
       await navigator.clipboard.writeText(url);
       setCopied(true);
+      toast.success("Join link copied");
       setTimeout(() => setCopied(false), 1800);
     } catch {
-      // ignore
+      toast.error("Could not copy link");
     }
   }
 
   return (
-    <header className="flex flex-wrap items-center gap-3 border-b border-white/10 bg-black/40 px-4 py-3 backdrop-blur">
-      <div className="flex items-center gap-2">
-        <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-gradient-to-br from-white/[0.08] to-transparent">
-          <span className="font-serif text-base text-parchment">W</span>
+    <header className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.06] bg-coal/60 px-4 py-2.5 backdrop-blur-xl">
+      <motion.div
+        className="flex items-center gap-2.5"
+        initial={{ opacity: 0, y: -6 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.32 }}
+      >
+        <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-gradient-to-br from-white/[0.07] to-transparent">
+          <WanderIcon size={22} strokeWidth={2.25} />
         </div>
         <div className="leading-tight">
           <p className="text-sm font-semibold text-parchment">Trip room</p>
-          <p className="text-[10px] uppercase tracking-widest text-parchment/45">{roomId.slice(0, 8)}…</p>
+          <p className="text-[10px] uppercase tracking-[0.2em] text-parchment/40">
+            {roomId.slice(0, 8)}…
+          </p>
         </div>
-      </div>
+      </motion.div>
 
-      <button
-        type="button"
-        onClick={() => void copyLink()}
-        className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1.5 text-xs text-parchment/80 hover:border-wander/40 hover:text-parchment"
-        title="Copy join link"
-      >
-        {copied ? "Link copied!" : "Copy join link"}
-      </button>
-
-      <div className="ml-auto flex flex-wrap items-center gap-2">
-        {participants.map((p) => {
-          const stale = now - p.lastSeenAt > 5 * 60 * 1000;
-          const isMe = p.id === meId;
-          return (
-            <div
-              key={p.id}
-              title={`${p.displayName}${isMe ? " (you)" : ""}${stale ? " · away" : ""}`}
-              className={`flex items-center gap-1.5 rounded-full border px-2 py-1 text-[11px] ${
-                stale ? "opacity-50" : ""
-              } ${isMe ? "border-wander/40 bg-wander-muted/40" : "border-white/10 bg-white/[0.04]"}`}
+      <div className="flex items-center gap-2.5">
+        <AvatarStack items={items} max={4} size="sm" />
+        <Button
+          variant="icon"
+          size="sm"
+          onClick={() => void copyLink()}
+          aria-label={copied ? "Link copied" : "Copy join link"}
+          title={copied ? "Link copied!" : "Copy join link"}
+        >
+          {copied ? (
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.4"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden
             >
-              <span
-                aria-hidden
-                className="flex h-5 w-5 items-center justify-center rounded-full text-[9px] font-bold text-black/80"
-                style={{ background: p.colorHex }}
-              >
-                {initials(p.displayName)}
-              </span>
-              <span className="text-parchment/90">
-                {p.displayName}
-                {isMe ? " (you)" : ""}
-              </span>
-            </div>
-          );
-        })}
+              <path d="M20 6 9 17l-5-5" />
+            </svg>
+          ) : (
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden
+            >
+              <path d="M10 13a5 5 0 0 0 7.07 0l3.54-3.54a5 5 0 1 0-7.07-7.07l-1.41 1.41" />
+              <path d="M14 11a5 5 0 0 0-7.07 0L3.4 14.54a5 5 0 1 0 7.07 7.07l1.41-1.41" />
+            </svg>
+          )}
+        </Button>
       </div>
     </header>
   );

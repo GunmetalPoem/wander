@@ -19,6 +19,14 @@ import { CityConfirmField } from "./CityConfirmField";
 import { TripChatPanel, type TripChatMessage } from "./TripChatPanel";
 import type { TripWeather } from "@/lib/weather";
 import type { TripStop } from "@/lib/trip-schema";
+import { AnimatePresence, easeOutQuart, motion, useReducedMotion } from "@/components/ui/Motion";
+import Modal from "@/components/ui/Modal";
+import Drawer from "@/components/ui/Drawer";
+import Accordion from "@/components/ui/Accordion";
+import SettingsPopover from "@/components/ui/SettingsPopover";
+import ShaderBackground from "@/components/ui/ShaderBackground";
+import Button from "@/components/ui/Button";
+import { useToast } from "@/components/ui/Toast";
 
 const TripMap = dynamic(() => import("./TripMap").then((m) => m.TripMap), {
   ssr: false,
@@ -35,16 +43,40 @@ type RouteFeatureState = {
 
 function TripPlanningLoadingView({ cityLabel }: { cityLabel: string }) {
   return (
-    <div className="flex w-full justify-center lg:h-[calc(100vh-5.5rem)]">
+    <motion.div
+      className="flex w-full justify-center lg:h-[calc(100vh-5.5rem)]"
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -6 }}
+      transition={{ duration: 0.32, ease: easeOutQuart }}
+    >
       <section className="relative flex min-h-[min(72vh,680px)] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-coal via-void to-black lg:min-h-[calc(100vh-6rem)]">
+        <ShaderBackground intensity="med" className="opacity-60" />
         <div className="pointer-events-none absolute inset-0 opacity-[0.07] [background-image:radial-gradient(circle_at_30%_20%,rgba(52,211,153,0.35),transparent_45%),radial-gradient(circle_at_80%_60%,rgba(255,255,255,0.12),transparent_40%)]" />
         <div className="relative flex min-h-[inherit] w-full flex-1 flex-col items-center justify-center gap-6 px-6 py-12">
-          <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] shadow-lg shadow-black/40">
+          <motion.div
+            className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] shadow-lg shadow-black/40"
+            initial={{ scale: 0.85, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={{ type: "spring", stiffness: 320, damping: 22 }}
+          >
             <div className="h-9 w-9 animate-spin rounded-full border-2 border-wander/25 border-t-wander" aria-hidden />
-          </div>
+          </motion.div>
           <div className="flex w-full max-w-xl flex-col items-center text-center">
-            <h2 className="font-serif text-2xl tracking-tight text-parchment sm:text-3xl">Building your itinerary</h2>
-            <p className="mt-4 w-full text-balance text-center text-sm leading-relaxed text-parchment/55">
+            <motion.h2
+              className="font-serif text-2xl tracking-tight text-parchment sm:text-3xl"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.1, duration: 0.4, ease: easeOutQuart }}
+            >
+              Building your itinerary
+            </motion.h2>
+            <motion.p
+              className="mt-4 w-full text-balance text-center text-sm leading-relaxed text-parchment/55"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.18, duration: 0.4 }}
+            >
               Laying out your days and stops on the map
               {cityLabel ? (
                 <>
@@ -53,12 +85,12 @@ function TripPlanningLoadingView({ cityLabel }: { cityLabel: string }) {
                 </>
               ) : null}
               …
-            </p>
+            </motion.p>
           </div>
           <p className="text-center text-[11px] text-parchment/35">This usually takes a few seconds.</p>
         </div>
       </section>
-    </div>
+    </motion.div>
   );
 }
 
@@ -73,6 +105,8 @@ const WELCOME_MESSAGES: TripChatMessage[] = [
 
 export function TripPlannerClient() {
   const router = useRouter();
+  const toast = useToast();
+  const reduce = useReducedMotion();
   const [creatingRoom, setCreatingRoom] = useState(false);
   const [form, setForm] = useState<TripFormInput>(defaultTripForm);
   const formRef = useRef(form);
@@ -572,365 +606,505 @@ export function TripPlannerClient() {
 
   const showPlanProgressShell = busy && !plan;
 
-  return (
-    <div className="relative left-1/2 min-w-0 w-screen max-w-[100vw] -translate-x-1/2 overflow-x-clip px-3 sm:px-5 lg:px-8">
-      {showPlanProgressShell ? (
-        <div className="w-full">
-          <TripPlanningLoadingView cityLabel={form.city} />
-          {err ? (
-            <p className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-center text-xs text-red-200">
-              {err}
-            </p>
-          ) : null}
-        </div>
-      ) : (
-    <div
-      className={`flex w-full min-w-0 flex-col gap-4 lg:h-[calc(100vh-5.5rem)] ${plan ? "lg:flex-row lg:items-stretch lg:gap-5" : ""}`}
-    >
-      <section
-        className={`order-1 flex min-h-0 w-full min-w-0 flex-col gap-3 overflow-y-auto overflow-x-hidden overscroll-y-contain ${
-          plan
-            ? "lg:order-1 lg:max-h-full lg:flex-[1.15_1_0] lg:min-w-[min(100%,420px)] lg:max-w-none"
-            : "lg:mx-auto lg:max-w-2xl lg:py-4"
-        }`}
-      >
-        <div className="relative z-10 rounded-3xl border border-white/[0.08] bg-black/35 p-4 shadow-xl shadow-black/30">
-          <div className="mb-3 flex items-center justify-between gap-2">
-            <div className="flex items-center gap-1 rounded-full border border-white/10 bg-black/40 p-1 text-[11px]">
-              <span className="rounded-full bg-wander px-3 py-1 font-semibold text-ink">Solo</span>
-              <button
-                type="button"
-                onClick={() => void shareWithGroup()}
-                disabled={creatingRoom}
-                className="rounded-full px-3 py-1 text-parchment/60 hover:text-parchment disabled:opacity-50"
-                title="Create a group trip room and invite friends"
-              >
-                {creatingRoom ? "Creating…" : "Group"}
-              </button>
-            </div>
-            <span className="text-[10px] text-parchment/40">Plan together with a shared link</span>
-          </div>
-          <TripChatPanel
-            messages={chatMessages}
-            onSend={handleChatSend}
-            busy={chatBusy}
-            canType={!chatBusy}
-            variant={plan ? "compact" : "hero"}
-            onBuildItinerary={buildItinerary}
-            buildDisabled={buildDisabled}
-            buildBusy={busy}
-            buildLabel={buildLabel}
-            buildHighlighted={buildHighlighted}
-            onNewTrip={startFreshTrip}
-            sendError={err}
-            onClearSendError={() => setErr(null)}
-          />
+  const copyTripJson = useCallback(() => {
+    if (!plan) return;
+    void navigator.clipboard.writeText(JSON.stringify(plan, null, 2));
+    toast.success("Trip JSON copied");
+  }, [plan, toast]);
 
-          <div className="mt-3 border-t border-white/[0.06] pt-3">
-            <p className="mb-1.5 text-[10px] uppercase tracking-widest text-parchment/40">Where</p>
-            <CityConfirmField value={form} onChange={setForm} />
-          </div>
+  const handleShareGroup = useCallback(async () => {
+    try {
+      await shareWithGroup();
+    } catch {
+      toast.error("Could not create group room. Try again.");
+    }
+  }, [shareWithGroup, toast]);
 
-          {itinerarySuggested && !plan ? (
-            <div className="mt-3 rounded-xl border border-wander/30 bg-wander-muted px-3 py-2.5 text-center text-[11px] leading-snug text-parchment/90">
-              {form.cityLocationReady ? (
-                <>Enough detail — Build / Update next to Send, or Wander will refresh the map when ready.</>
-              ) : (
-                <>Confirm the Where line above, then use Build next to Send.</>
-              )}
-            </div>
-          ) : null}
+  const settingsContent = (close: () => void) => (
+    <div className="p-3.5">
+      <p className="mb-2 text-[10px] uppercase tracking-[0.18em] text-parchment/40">Mode</p>
+      <div className="flex items-center gap-1 rounded-full border border-white/10 bg-black/40 p-1 text-[11px]">
+        <span className="rounded-full bg-wander px-3 py-1 font-semibold text-ink">Solo</span>
+        <button
+          type="button"
+          onClick={() => {
+            close();
+            void handleShareGroup();
+          }}
+          disabled={creatingRoom}
+          className="rounded-full px-3 py-1 text-parchment/70 transition-colors hover:bg-white/[0.05] hover:text-parchment disabled:opacity-50"
+          title="Create a group trip room and invite friends"
+        >
+          {creatingRoom ? "Creating…" : "Group"}
+        </button>
+      </div>
+      <p className="mt-1.5 text-[10px] text-parchment/45">Plan together with a shared link.</p>
 
-          <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-white/[0.06] pt-3">
-            {awaitingCityForPlan && !form.cityLocationReady ? (
-              <span className="text-[10px] text-wander/80">Pick the city in Where first.</span>
-            ) : null}
+      <div className="mt-3 border-t border-white/[0.06] pt-3">
+        <p className="mb-2 text-[10px] uppercase tracking-[0.18em] text-parchment/40">Trip controls</p>
+        <div className="flex flex-col gap-1.5">
+          <button
+            type="button"
+            onClick={() => {
+              close();
+              setManualFieldsOpen(true);
+            }}
+            className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-left text-[12px] text-parchment/85 transition-colors hover:border-wander/30 hover:bg-wander-muted"
+          >
+            All trip fields…
+          </button>
+          {plan ? (
             <button
               type="button"
-              onClick={() => setManualFieldsOpen(true)}
-              className="text-[11px] text-parchment/50 underline-offset-2 hover:text-parchment hover:underline"
+              onClick={() => {
+                close();
+                copyTripJson();
+              }}
+              className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-left text-[12px] text-parchment/85 transition-colors hover:border-wander/30 hover:bg-wander-muted"
             >
-              All trip fields…
+              Copy trip JSON
             </button>
-          </div>
-        </div>
-
-        {err && (
-          <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">{err}</p>
-        )}
-
-        {manualFieldsOpen && (
-          <div
-            className="fixed inset-0 z-[45] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="manual-trip-fields-title"
-            onClick={() => setManualFieldsOpen(false)}
-          >
-            <div
-              className="max-h-[min(88vh,720px)] w-full max-w-lg overflow-y-auto overscroll-contain rounded-2xl border border-white/10 bg-coal p-4 shadow-2xl"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="mb-3 flex items-start justify-between gap-3">
-                <div>
-                  <h2 id="manual-trip-fields-title" className="font-serif text-lg text-parchment">
-                    Trip fields
-                  </h2>
-                  <p className="mt-0.5 text-[11px] text-parchment/45">Optional — chat usually fills these. Escape to close.</p>
-                </div>
-                <button
-                  type="button"
-                  className="rounded-lg border border-white/10 px-2.5 py-1 text-xs text-parchment/80 hover:bg-white/5"
-                  onClick={() => setManualFieldsOpen(false)}
-                >
-                  Close
-                </button>
-              </div>
-              <TripForm
-                value={form}
-                onChange={setForm}
-                onSubmit={() => {
-                  buildItinerary();
-                  setManualFieldsOpen(false);
-                }}
-                onLoadDemo={() => {
-                  onLoadDemo();
-                  setManualFieldsOpen(false);
-                }}
-                busy={busy}
-              />
-            </div>
-          </div>
-        )}
-
-        {plan && (
-          <>
-            <TripSummary
-              plan={plan}
-              weather={weather}
-              activeDay={activeDay}
-              totalWalkMinutes={totalWalkMinutes}
-              totalDistanceKm={totalDistanceKm}
-              stopCount={currentStops.length}
-            />
-            <h3 className="text-xs uppercase tracking-widest text-parchment/50">Timeline</h3>
-            <TripTimeline
-              dayNumbers={dayNumbers}
-              activeDay={activeDay}
-              onDayChange={setActiveDay}
-              scheduled={scheduled}
-              onReorder={onReorder}
-              selectedStopId={selectedStopId}
-              onSelectStop={setSelectedStopId}
-              onExpandStop={setExpandedStopId}
-              onDeleteStop={onDeleteStop}
-              mapboxAccessToken={mapboxToken}
-              isRefreshing={busy && !!plan}
-            />
-            <div className="flex flex-wrap gap-2 border-t border-white/5 pt-2">
-              <button
-                type="button"
-                className="text-xs text-wander/90 hover:underline"
-                onClick={() => {
-                  void navigator.clipboard.writeText(JSON.stringify(plan, null, 2));
-                }}
-              >
-                Copy trip JSON
-              </button>
-              {selectedStopId && (
-                <span className="text-[10px] text-parchment/50">
-                  Blue dots: nearby {form.accessibility.restStops ? "rest stops (bathrooms)" : "places (search)"}.
-                  Pick a stop on the map or list.
-                </span>
-              )}
-            </div>
-          </>
-        )}
-
-        {!plan && !busy && !chatBusy && (
-          <p className="text-center text-[11px] text-parchment/40">
-            Needs <code className="text-parchment/55">ANTHROPIC_API_KEY</code> or <code className="text-parchment/55">OPENAI_API_KEY</code>
-            . SF demo: <button type="button" className="text-wander/90 hover:underline" onClick={() => setManualFieldsOpen(true)}>All trip fields</button> → Load SF demo.
-          </p>
-        )}
-      </section>
-
-      {plan ? (
-        <section className="order-2 relative h-[42vh] min-h-[280px] w-full min-w-0 shrink-0 overflow-hidden rounded-2xl border border-white/10 lg:h-auto lg:min-h-0 lg:flex-[1.35_1_0] lg:min-w-[min(100%,360px)]">
-          <TripMap
-            mapboxToken={mapboxToken}
-            plan={plan}
-            activeDay={activeDay}
-            selectedStopId={selectedStopId}
-            onSelectStop={setSelectedStopId}
-            routeFeature={routeFeature}
-            extraMarkers={extraMarkers}
-          />
-          {busy ? (
-            <div
-              className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-end gap-2 bg-gradient-to-t from-black/75 via-black/35 to-transparent pb-6 pt-16"
-              aria-live="polite"
-              aria-busy="true"
-            >
-              <div className="flex items-center gap-2 rounded-full border border-wander/25 bg-black/70 px-3 py-1.5 shadow-lg backdrop-blur-sm">
-                <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-wander/25 border-t-wander" />
-                <span className="text-[11px] font-medium text-parchment/95">Updating map &amp; stops…</span>
-              </div>
-            </div>
           ) : null}
-        </section>
-      ) : null}
-      {plan && expandedStop && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
-          role="dialog"
-          aria-modal="true"
-          onClick={() => setExpandedStopId(null)}
-        >
-          <div
-            className="w-full max-w-2xl rounded-2xl border border-white/10 bg-[#0b0b0b] p-4 text-parchment/90 shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
+          <button
+            type="button"
+            onClick={() => {
+              close();
+              startFreshTrip();
+            }}
+            className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-left text-[12px] text-parchment/85 transition-colors hover:border-red-500/30 hover:bg-red-500/10"
           >
-            <div className="flex items-start justify-between gap-3">
+            New trip
+          </button>
+        </div>
+      </div>
+
+      {!plan && !busy && !chatBusy ? (
+        <p className="mt-3 border-t border-white/[0.06] pt-3 text-[10px] leading-snug text-parchment/40">
+          Needs <code className="text-parchment/55">ANTHROPIC_API_KEY</code> or{" "}
+          <code className="text-parchment/55">OPENAI_API_KEY</code>. Use “All trip fields” → Load SF demo to try the flow.
+        </p>
+      ) : null}
+    </div>
+  );
+
+  return (
+    <div className="relative left-1/2 min-w-0 w-screen max-w-[100vw] -translate-x-1/2 overflow-x-clip px-3 sm:px-5 lg:px-8">
+      <AnimatePresence mode="wait" initial={false}>
+        {showPlanProgressShell ? (
+          <motion.div key="loading" className="w-full">
+            <TripPlanningLoadingView cityLabel={form.city} />
+          </motion.div>
+        ) : (
+          <motion.div
+            key="main"
+            initial={reduce ? { opacity: 0 } : { opacity: 0, y: 8 }}
+            animate={reduce ? { opacity: 1 } : { opacity: 1, y: 0 }}
+            exit={reduce ? { opacity: 0 } : { opacity: 0, y: -6 }}
+            transition={{ duration: 0.32, ease: easeOutQuart }}
+            className={`flex w-full min-w-0 flex-col gap-4 lg:h-[calc(100vh-5.5rem)] ${
+              plan ? "lg:flex-row lg:items-stretch lg:gap-5" : ""
+            }`}
+          >
+            <section
+              className={`relative order-1 flex min-h-0 w-full min-w-0 flex-col gap-3 overflow-y-auto overflow-x-hidden overscroll-y-contain ${
+                plan
+                  ? "lg:order-1 lg:max-h-full lg:flex-[1.15_1_0] lg:min-w-[min(100%,420px)] lg:max-w-none"
+                  : "lg:mx-auto lg:max-w-2xl lg:py-4 lg:justify-center"
+              }`}
+            >
+              <motion.div
+                layout
+                className={`relative z-10 flex flex-col overflow-hidden rounded-3xl border border-white/[0.08] bg-black/40 p-4 shadow-2xl shadow-black/40 backdrop-blur-xl ${
+                  plan
+                    ? "min-h-[460px] shrink-0 lg:h-[60vh] lg:min-h-[460px] lg:max-h-[680px]"
+                    : "min-h-[320px]"
+                }`}
+              >
+                <ShaderBackground
+                  intensity={plan ? "low" : "med"}
+                  className={plan ? "opacity-30" : "opacity-80"}
+                />
+                <div
+                  aria-hidden
+                  className="pointer-events-none absolute inset-0 [border-radius:inherit] bg-gradient-to-b from-black/10 via-transparent to-black/40"
+                />
+
+
+                <div className="absolute right-3 top-3 z-20">
+                  <SettingsPopover
+                    trigger={({ toggle, open }) => (
+                      <Button
+                        variant="icon"
+                        size="sm"
+                        aria-label="Settings"
+                        aria-expanded={open}
+                        onClick={toggle}
+                      >
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          width="15"
+                          height="15"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          aria-hidden
+                        >
+                          <circle cx="12" cy="12" r="3" />
+                          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09A1.65 1.65 0 0 0 15 4.6a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.36.86.97 1.51 1.85 1.51H21a2 2 0 1 1 0 4h-.09c-.88 0-1.49.65-1.51 1.49Z" />
+                        </svg>
+                      </Button>
+                    )}
+                  >
+                    {({ close }) => settingsContent(close)}
+                  </SettingsPopover>
+                </div>
+
+                <div className={`relative z-10 flex min-h-0 flex-1 flex-col ${plan ? "pr-10" : ""}`}>
+                  <TripChatPanel
+                    messages={chatMessages}
+                    onSend={handleChatSend}
+                    busy={chatBusy}
+                    canType={!chatBusy}
+                    variant={plan ? "compact" : "hero"}
+                    onBuildItinerary={buildItinerary}
+                    buildDisabled={buildDisabled}
+                    buildBusy={busy}
+                    buildLabel={buildLabel}
+                    buildHighlighted={buildHighlighted}
+                    onNewTrip={startFreshTrip}
+                    sendError={err}
+                    onClearSendError={() => setErr(null)}
+                  />
+
+                  <motion.div layout className="mt-3 border-t border-white/[0.06] pt-3">
+                    <p className="mb-1.5 text-[10px] uppercase tracking-[0.18em] text-parchment/40">Where</p>
+                    <CityConfirmField value={form} onChange={setForm} />
+                  </motion.div>
+
+                  <AnimatePresence>
+                    {itinerarySuggested && !plan ? (
+                      <motion.div
+                        initial={{ opacity: 0, y: 6, height: 0 }}
+                        animate={{ opacity: 1, y: 0, height: "auto" }}
+                        exit={{ opacity: 0, y: -4, height: 0 }}
+                        transition={{ duration: 0.26, ease: easeOutQuart }}
+                        className="overflow-hidden"
+                      >
+                        <div className="mt-3 rounded-xl border border-wander/30 bg-wander-muted px-3 py-2.5 text-center text-[11px] leading-snug text-parchment/90">
+                          {form.cityLocationReady ? (
+                            <>Enough detail — tap Build next to Send, or Wander will refresh the map when ready.</>
+                          ) : (
+                            <>Confirm the Where line above, then use Build next to Send.</>
+                          )}
+                        </div>
+                      </motion.div>
+                    ) : null}
+                  </AnimatePresence>
+
+                  {awaitingCityForPlan && !form.cityLocationReady ? (
+                    <p className="mt-2 text-[10px] text-wander/80">Pick the city in Where first.</p>
+                  ) : null}
+                </div>
+              </motion.div>
+
+              {plan ? (
+                <motion.div
+                  initial={reduce ? { opacity: 0 } : { opacity: 0, y: 16 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.32, ease: easeOutQuart, delay: 0.08 }}
+                  className="flex flex-col gap-3"
+                >
+                  <TripSummary
+                    plan={plan}
+                    weather={weather}
+                    activeDay={activeDay}
+                    totalWalkMinutes={totalWalkMinutes}
+                    totalDistanceKm={totalDistanceKm}
+                    stopCount={currentStops.length}
+                  />
+                  <h3 className="text-xs uppercase tracking-[0.18em] text-parchment/45">Timeline</h3>
+                  <TripTimeline
+                    dayNumbers={dayNumbers}
+                    activeDay={activeDay}
+                    onDayChange={setActiveDay}
+                    scheduled={scheduled}
+                    onReorder={onReorder}
+                    selectedStopId={selectedStopId}
+                    onSelectStop={setSelectedStopId}
+                    onExpandStop={setExpandedStopId}
+                    onDeleteStop={onDeleteStop}
+                    mapboxAccessToken={mapboxToken}
+                    isRefreshing={busy && !!plan}
+                  />
+                  {selectedStopId ? (
+                    <p className="text-[10px] text-parchment/45">
+                      Blue dots: nearby {form.accessibility.restStops ? "rest stops (bathrooms)" : "places (search)"}.
+                    </p>
+                  ) : null}
+                </motion.div>
+              ) : null}
+            </section>
+
+            {plan ? (
+              <motion.section
+                key="map"
+                initial={reduce ? { opacity: 0 } : { opacity: 0, x: 24 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ duration: 0.42, ease: easeOutQuart, delay: 0.05 }}
+                className="order-2 relative h-[42vh] min-h-[280px] w-full min-w-0 shrink-0 overflow-hidden rounded-2xl border border-white/10 lg:h-auto lg:min-h-0 lg:flex-[1.35_1_0] lg:min-w-[min(100%,360px)]"
+              >
+                <TripMap
+                  mapboxToken={mapboxToken}
+                  plan={plan}
+                  activeDay={activeDay}
+                  selectedStopId={selectedStopId}
+                  onSelectStop={setSelectedStopId}
+                  routeFeature={routeFeature}
+                  extraMarkers={extraMarkers}
+                />
+                <AnimatePresence>
+                  {busy ? (
+                    <motion.div
+                      key="map-busy"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      transition={{ duration: 0.22 }}
+                      className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-end gap-2 bg-gradient-to-t from-black/75 via-black/35 to-transparent pb-6 pt-16"
+                      aria-live="polite"
+                      aria-busy="true"
+                    >
+                      <div className="flex items-center gap-2 rounded-full border border-wander/25 bg-black/70 px-3 py-1.5 shadow-lg backdrop-blur-sm">
+                        <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-wander/25 border-t-wander" />
+                        <span className="text-[11px] font-medium text-parchment/95">Updating map &amp; stops…</span>
+                      </div>
+                    </motion.div>
+                  ) : null}
+                </AnimatePresence>
+              </motion.section>
+            ) : null}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <Modal
+        open={manualFieldsOpen}
+        onClose={() => setManualFieldsOpen(false)}
+        labelledBy="manual-trip-fields-title"
+        widthClass="max-w-lg"
+      >
+        <div className="max-h-[min(88vh,720px)] overflow-y-auto p-4">
+          <div className="mb-3 flex items-start justify-between gap-3">
+            <div>
+              <h2 id="manual-trip-fields-title" className="font-serif text-lg text-parchment">
+                Trip fields
+              </h2>
+              <p className="mt-0.5 text-[11px] text-parchment/45">
+                Optional — chat usually fills these. Escape to close.
+              </p>
+            </div>
+            <Button variant="ghost" size="sm" onClick={() => setManualFieldsOpen(false)}>
+              Close
+            </Button>
+          </div>
+          <TripForm
+            value={form}
+            onChange={setForm}
+            onSubmit={() => {
+              buildItinerary();
+              setManualFieldsOpen(false);
+            }}
+            onLoadDemo={() => {
+              onLoadDemo();
+              setManualFieldsOpen(false);
+            }}
+            busy={busy}
+          />
+        </div>
+      </Modal>
+
+      <Drawer
+        open={Boolean(plan && expandedStop)}
+        onClose={() => setExpandedStopId(null)}
+        widthClass="max-w-md"
+        labelledBy="stop-details-title"
+      >
+        {expandedStop ? (
+          <div className="flex h-full flex-col">
+            <div className="flex items-start justify-between gap-3 border-b border-white/[0.06] px-5 py-4">
               <div className="min-w-0">
-                <p className="text-[10px] uppercase tracking-widest text-parchment/50">Stop details</p>
-                <h3 className="mt-1 text-xl font-serif text-parchment">{expandedStop.name}</h3>
-                <p className="mt-1 text-sm text-parchment/60">{expandedStop.address}</p>
+                <p className="text-[10px] uppercase tracking-[0.18em] text-parchment/45">Stop details</p>
+                <h3 id="stop-details-title" className="mt-1 truncate text-lg font-serif text-parchment">
+                  {expandedStop.name}
+                </h3>
+                <p className="mt-0.5 truncate text-xs text-parchment/55">{expandedStop.address}</p>
               </div>
-              <button
-                type="button"
-                className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-parchment/80 hover:bg-white/10"
+              <Button
+                variant="icon"
+                size="sm"
+                aria-label="Close details"
                 onClick={() => setExpandedStopId(null)}
               >
-                Collapse
-              </button>
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  aria-hidden
+                >
+                  <path d="M18 6 6 18M6 6l12 12" />
+                </svg>
+              </Button>
             </div>
 
-            <div className="mt-4 space-y-3 text-sm">
-              {expandedStop.description?.trim() && (
-                <div className="rounded-xl border border-white/10 bg-black/30 p-3">
-                  <p className="text-[10px] uppercase tracking-widest text-parchment/50">Why go</p>
-                  <p className="mt-1 text-parchment/80">{expandedStop.description}</p>
+            <div className="wander-scroll min-h-0 flex-1 space-y-3 overflow-y-auto p-5 text-sm text-parchment/85">
+              {expandedStop.description?.trim() ? (
+                <div className="rounded-xl border border-white/8 bg-black/25 p-3">
+                  <p className="text-[10px] uppercase tracking-[0.18em] text-parchment/45">Why go</p>
+                  <p className="mt-1 leading-relaxed text-parchment/85">{expandedStop.description}</p>
                 </div>
-              )}
+              ) : null}
 
-              {deepBusy && (
-                <div className="rounded-xl border border-white/10 bg-black/30 p-3 text-xs text-parchment/60">
-                  Fetching more details (hours, fees, menu highlights)…
+              {expandedMergedDetails?.cuisine || expandedMergedDetails?.openingHoursText?.length ? (
+                <div className="rounded-xl border border-white/8 bg-black/25 p-3 text-[12px] text-parchment/80 space-y-1">
+                  {expandedMergedDetails.cuisine ? (
+                    <p>
+                      <span className="text-parchment/45">Cuisine:</span> {expandedMergedDetails.cuisine}
+                    </p>
+                  ) : null}
+                  {expandedMergedDetails.openingHoursText?.length ? (
+                    <p>
+                      <span className="text-parchment/45">Open:</span>{" "}
+                      {expandedMergedDetails.openingHoursText[0]}
+                    </p>
+                  ) : null}
                 </div>
-              )}
-              {!deepBusy && expandedDeepHint && (
+              ) : null}
+
+              <AnimatePresence>
+                {deepBusy ? (
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="rounded-xl border border-white/8 bg-black/25 p-3 text-xs text-parchment/55"
+                  >
+                    <span className="inline-flex items-center gap-2">
+                      <span className="h-3 w-3 animate-spin rounded-full border-2 border-wander/30 border-t-wander" />
+                      Fetching more details (hours, fees, menu highlights)…
+                    </span>
+                  </motion.div>
+                ) : null}
+              </AnimatePresence>
+
+              {!deepBusy && expandedDeepHint ? (
                 <div className="rounded-xl border border-wander/25 bg-wander-muted p-3 text-xs text-parchment/80">
                   {expandedDeepHint}
                 </div>
-              )}
+              ) : null}
 
-              {expandedMergedDetails && (
-                <div className="rounded-xl border border-white/10 bg-black/30 p-3">
-                  <p className="text-[10px] uppercase tracking-widest text-parchment/50">Extra info</p>
-                  <div className="mt-2 space-y-1 text-parchment/80">
-                    {expandedMergedDetails.cuisine && (
-                      <p>
-                        <span className="text-parchment/50">Cuisine:</span> {expandedMergedDetails.cuisine}
-                      </p>
-                    )}
-                    {expandedMergedDetails.openingHoursText?.length ? (
-                      <div>
-                        <p className="text-parchment/50">Hours:</p>
-                        <ul className="mt-1 list-disc space-y-0.5 pl-5">
-                          {expandedMergedDetails.openingHoursText.map((t) => (
-                            <li key={t}>{t}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    ) : null}
-                    {expandedMergedDetails.admission && (
-                      <div>
-                        <p className="text-parchment/50">Admission:</p>
-                        <ul className="mt-1 list-disc space-y-0.5 pl-5">
-                          {expandedMergedDetails.admission.summary && <li>{expandedMergedDetails.admission.summary}</li>}
-                          {expandedMergedDetails.admission.member && <li>Member: {expandedMergedDetails.admission.member}</li>}
-                          {expandedMergedDetails.admission.adult && <li>Adult: {expandedMergedDetails.admission.adult}</li>}
-                          {expandedMergedDetails.admission.student && <li>Student: {expandedMergedDetails.admission.student}</li>}
-                          {expandedMergedDetails.admission.teen && <li>Teen: {expandedMergedDetails.admission.teen}</li>}
-                          {expandedMergedDetails.admission.child && <li>Child: {expandedMergedDetails.admission.child}</li>}
-                          {expandedMergedDetails.admission.senior && <li>Senior: {expandedMergedDetails.admission.senior}</li>}
-                          {expandedMergedDetails.admission.freeDays && <li>Free days: {expandedMergedDetails.admission.freeDays}</li>}
-                        </ul>
-                      </div>
-                    )}
-                    {expandedMergedDetails.fees && (
-                      <div>
-                        <p className="text-parchment/50">Fees / permits:</p>
-                        <ul className="mt-1 list-disc space-y-0.5 pl-5">
-                          {expandedMergedDetails.fees.entry && <li>Entry: {expandedMergedDetails.fees.entry}</li>}
-                          {expandedMergedDetails.fees.parking && <li>Parking: {expandedMergedDetails.fees.parking}</li>}
-                          {expandedMergedDetails.fees.permit && <li>Permit: {expandedMergedDetails.fees.permit}</li>}
-                        </ul>
-                      </div>
-                    )}
-                    {expandedMergedDetails.menuHighlights?.length ? (
-                      <div>
-                        <p className="text-parchment/50">Menu highlights:</p>
-                        <ul className="mt-1 list-disc space-y-0.5 pl-5">
-                          {expandedMergedDetails.menuHighlights.slice(0, 10).map((t) => (
-                            <li key={t}>{t}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    ) : null}
-                    {expandedMergedDetails.ticketingUrl && (
-                      <p className="break-words">
-                        <span className="text-parchment/50">Tickets:</span>{" "}
-                        <a
-                          className="text-wander/90 hover:underline"
-                          href={expandedMergedDetails.ticketingUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          {expandedMergedDetails.ticketingUrl}
-                        </a>
-                      </p>
-                    )}
-                    {expandedMergedDetails.wheelchairAccessibleEntrance != null && (
-                      <p>
-                        <span className="text-parchment/50">Wheelchair entrance:</span>{" "}
-                        {expandedMergedDetails.wheelchairAccessibleEntrance ? "Yes" : "No / unknown"}
-                      </p>
-                    )}
-                    {expandedMergedDetails.website && (
-                      <p className="break-words">
-                        <span className="text-parchment/50">Website:</span>{" "}
-                        <a
-                          className="text-wander/90 hover:underline"
-                          href={expandedMergedDetails.website}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          {expandedMergedDetails.website}
-                        </a>
-                      </p>
-                    )}
-                    {expandedMergedDetails.phone && (
-                      <p>
-                        <span className="text-parchment/50">Phone:</span> {expandedMergedDetails.phone}
-                      </p>
-                    )}
-                    {expandedMergedDetails.provider && (
-                      <p className="text-[11px] text-parchment/40">
-                        Source: {expandedMergedDetails.provider.toUpperCase()}
-                        {expandedMergedDetails.deepSourceUrl ? ` · Deep: ${expandedMergedDetails.deepSourceUrl}` : ""}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              )}
+              {expandedMergedDetails?.admission ? (
+                <Accordion title="Admission">
+                  <ul className="list-disc space-y-0.5 pl-5">
+                    {expandedMergedDetails.admission.summary && <li>{expandedMergedDetails.admission.summary}</li>}
+                    {expandedMergedDetails.admission.member && <li>Member: {expandedMergedDetails.admission.member}</li>}
+                    {expandedMergedDetails.admission.adult && <li>Adult: {expandedMergedDetails.admission.adult}</li>}
+                    {expandedMergedDetails.admission.student && <li>Student: {expandedMergedDetails.admission.student}</li>}
+                    {expandedMergedDetails.admission.teen && <li>Teen: {expandedMergedDetails.admission.teen}</li>}
+                    {expandedMergedDetails.admission.child && <li>Child: {expandedMergedDetails.admission.child}</li>}
+                    {expandedMergedDetails.admission.senior && <li>Senior: {expandedMergedDetails.admission.senior}</li>}
+                    {expandedMergedDetails.admission.freeDays && <li>Free days: {expandedMergedDetails.admission.freeDays}</li>}
+                  </ul>
+                </Accordion>
+              ) : null}
+
+              {expandedMergedDetails?.fees ? (
+                <Accordion title="Fees & permits">
+                  <ul className="list-disc space-y-0.5 pl-5">
+                    {expandedMergedDetails.fees.entry && <li>Entry: {expandedMergedDetails.fees.entry}</li>}
+                    {expandedMergedDetails.fees.parking && <li>Parking: {expandedMergedDetails.fees.parking}</li>}
+                    {expandedMergedDetails.fees.permit && <li>Permit: {expandedMergedDetails.fees.permit}</li>}
+                  </ul>
+                </Accordion>
+              ) : null}
+
+              {expandedMergedDetails?.menuHighlights?.length ? (
+                <Accordion title="Menu highlights">
+                  <ul className="list-disc space-y-0.5 pl-5">
+                    {expandedMergedDetails.menuHighlights.slice(0, 10).map((t) => (
+                      <li key={t}>{t}</li>
+                    ))}
+                  </ul>
+                </Accordion>
+              ) : null}
+
+              {expandedMergedDetails?.openingHoursText?.length ? (
+                <Accordion title="Hours (full)">
+                  <ul className="list-disc space-y-0.5 pl-5">
+                    {expandedMergedDetails.openingHoursText.map((t) => (
+                      <li key={t}>{t}</li>
+                    ))}
+                  </ul>
+                </Accordion>
+              ) : null}
+
+              {expandedMergedDetails?.wheelchairAccessibleEntrance != null ? (
+                <Accordion title="Wheelchair access">
+                  <p>
+                    Entrance:{" "}
+                    {expandedMergedDetails.wheelchairAccessibleEntrance ? "Yes" : "No / unknown"}
+                  </p>
+                </Accordion>
+              ) : null}
+
+              {expandedMergedDetails?.ticketingUrl ? (
+                <Accordion title="Ticketing">
+                  <a
+                    className="break-all text-wander/90 hover:underline"
+                    href={expandedMergedDetails.ticketingUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    {expandedMergedDetails.ticketingUrl}
+                  </a>
+                </Accordion>
+              ) : null}
+
+              {expandedMergedDetails?.website ? (
+                <Accordion title="Website">
+                  <a
+                    className="break-all text-wander/90 hover:underline"
+                    href={expandedMergedDetails.website}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    {expandedMergedDetails.website}
+                  </a>
+                </Accordion>
+              ) : null}
+
+              {expandedMergedDetails?.phone ? (
+                <Accordion title="Phone">
+                  <p>{expandedMergedDetails.phone}</p>
+                </Accordion>
+              ) : null}
+
+              {expandedMergedDetails?.provider ? (
+                <p className="pt-2 text-[10px] text-parchment/40">
+                  Source: {expandedMergedDetails.provider.toUpperCase()}
+                  {expandedMergedDetails.deepSourceUrl ? ` · Deep: ${expandedMergedDetails.deepSourceUrl}` : ""}
+                </p>
+              ) : null}
             </div>
           </div>
-        </div>
-      )}
-    </div>
-      )}
+        ) : null}
+      </Drawer>
     </div>
   );
 }

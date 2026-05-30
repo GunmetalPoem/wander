@@ -1,6 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import Modal from "@/components/ui/Modal";
+import Button from "@/components/ui/Button";
+import { motion } from "@/components/ui/Motion";
 
 type Props = {
   roomId: string;
@@ -41,9 +44,11 @@ export function RoomJoinModal({ roomId, onJoined }: Props) {
   }
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 backdrop-blur-sm">
-      <div className="mx-4 w-full max-w-sm rounded-2xl border border-white/10 bg-coal p-5 shadow-xl shadow-black/60">
-        <h2 className="font-serif text-xl text-parchment">Join trip room</h2>
+    <Modal open onClose={() => undefined} labelledBy="room-join-title" widthClass="max-w-sm" closeOnBackdrop={false}>
+      <div className="p-5">
+        <h2 id="room-join-title" className="font-serif text-xl text-parchment">
+          Join trip room
+        </h2>
         <p className="mt-1 text-sm text-parchment/60">
           Pick a name your friends will recognise. No login needed.
         </p>
@@ -60,18 +65,29 @@ export function RoomJoinModal({ roomId, onJoined }: Props) {
             }
           }}
           placeholder="Your name"
-          className="mt-4 w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm text-parchment outline-none focus:border-wander/40"
+          className="mt-4 w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2.5 text-sm text-parchment outline-none transition-colors focus:border-wander/40"
         />
-        {error && <p className="mt-2 text-xs text-red-300">{error}</p>}
-        <button
-          type="button"
+        {error ? (
+          <motion.p
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mt-2 text-xs text-red-300"
+          >
+            {error}
+          </motion.p>
+        ) : null}
+        <Button
+          variant="primary"
+          size="md"
+          loading={busy}
+          shimmer={!busy && Boolean(name.trim())}
           onClick={() => void submit()}
           disabled={busy || !name.trim()}
-          className="mt-4 w-full rounded-xl bg-wander px-4 py-2 text-sm font-semibold text-ink hover:bg-wander/90 disabled:opacity-50"
+          className="mt-4 w-full"
         >
           {busy ? "Joining…" : "Join"}
-        </button>
+        </Button>
       </div>
-    </div>
+    </Modal>
   );
 }

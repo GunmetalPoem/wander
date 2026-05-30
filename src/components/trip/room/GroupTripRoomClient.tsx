@@ -8,9 +8,24 @@ import type { TripWeather } from "@/lib/weather";
 import type { TripChatPatch } from "@/lib/trip-chat-merge";
 import type { ConflictReport } from "@/lib/room-unified-draft";
 import { scheduleDayStops, suggestedDayStartMinutes, type ScheduledStop } from "@/lib/trip-time";
+import { WanderIcon } from "@/components/WanderIcon";
 import { RoomTopBar } from "./RoomTopBar";
 import { RoomJoinModal } from "./RoomJoinModal";
-import { RoomErrorToast } from "./RoomErrorToast";
+import {
+  AnimatePresence,
+  easeOutQuart,
+  motion,
+  slideUp,
+  springSoft,
+  staggerChildren,
+  useReducedMotion,
+} from "@/components/ui/Motion";
+import MessageBubble from "@/components/ui/MessageBubble";
+import Button from "@/components/ui/Button";
+import Accordion from "@/components/ui/Accordion";
+import SettingsPopover from "@/components/ui/SettingsPopover";
+import ShaderBackground from "@/components/ui/ShaderBackground";
+import { useToast } from "@/components/ui/Toast";
 
 const TripMap = dynamic(() => import("@/components/trip/TripMap").then((m) => m.TripMap), {
   ssr: false,
@@ -87,16 +102,24 @@ function summarizeDraft(d: TripFormInput): { key: string; label: string }[] {
 }
 
 export function GroupTripRoomClient({ roomId, initialSnapshot, initialMeId }: Props) {
+  const toast = useToast();
+  const reduce = useReducedMotion();
   const [snap, setSnap] = useState<RoomSnapshot>({
     ...initialSnapshot,
     pendingAiCount: initialSnapshot.pendingAiCount ?? 0,
   });
   const [meId, setMeId] = useState<string | null>(initialMeId);
   const [buildBusy, setBuildBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [activeDay, setActiveDay] = useState(1);
   const [selectedStopId, setSelectedStopId] = useState<string | null>(null);
+
+  const setError = useCallback(
+    (msg: string | null) => {
+      if (msg) toast.error(msg);
+    },
+    [toast],
+  );
 
   const sinceRef = useRef<number>(initialSnapshot.serverTime);
   const messageIdsRef = useRef<Set<string>>(new Set(initialSnapshot.messages.map((m) => m.id)));
@@ -155,14 +178,17 @@ export function GroupTripRoomClient({ roomId, initialSnapshot, initialMeId }: Pr
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [roomId, mergeSnapshot, snap.pendingAiCount]);
+  }, [roomId, mergeSnapshot, snap.pendingAiCount, setError]);
 
-  // Auto-scroll chat to bottom on new messages.
+  // Auto-scroll chat to bottom on new messages — only when user is already near the bottom.
   useEffect(() => {
     const el = chatScrollRef.current;
     if (!el) return;
-    el.scrollTop = el.scrollHeight;
-  }, [snap.messages.length]);
+    const near = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+    if (near) {
+      el.scrollTo({ top: el.scrollHeight, behavior: reduce ? "auto" : "smooth" });
+    }
+  }, [snap.messages.length, reduce]);
 
   const onJoined = useCallback((p: { id: string; displayName: string; colorHex: string }) => {
     setMeId(p.id);
@@ -242,7 +268,7 @@ export function GroupTripRoomClient({ roomId, initialSnapshot, initialMeId }: Pr
         }
       })();
     },
-    [me, roomId, mergeSnapshot],
+    [me, roomId, mergeSnapshot, setError],
   );
 
   const onBuild = useCallback(async () => {
@@ -266,7 +292,7 @@ export function GroupTripRoomClient({ roomId, initialSnapshot, initialMeId }: Pr
     } finally {
       setBuildBusy(false);
     }
-  }, [roomId, buildBusy]);
+  }, [roomId, buildBusy, setError]);
 
   // Plan rendering helpers.
   const plan = snap.plan;
@@ -309,8 +335,43 @@ export function GroupTripRoomClient({ roomId, initialSnapshot, initialMeId }: Pr
 
   const sendDisabled = !meId;
 
+  const settingsContent = (close: () => void) => (
+    <div className="p-3.5">
+      <p className="mb-2 text-[10px] uppercase tracking-[0.18em] text-parchment/40">Mode</p>
+      <div className="flex items-center gap-1 rounded-full border border-white/10 bg-black/40 p-1 text-[11px]">
+        <Link
+          href="/"
+          onClick={close}
+          className="rounded-full px-3 py-1 text-parchment/70 transition-colors hover:bg-white/[0.05] hover:text-parchment"
+        >
+          Solo
+        </Link>
+        <span className="rounded-full bg-wander px-3 py-1 font-semibold text-ink">Group</span>
+      </div>
+
+      <div className="mt-3 border-t border-white/[0.06] pt-3">
+        <p className="mb-2 text-[10px] uppercase tracking-[0.18em] text-parchment/40">AI status</p>
+        {snap.pendingAiCount > 0 ? (
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-wander/30 bg-wander-muted/40 px-2.5 py-1 text-[11px] text-wander/95">
+            <span className="h-1.5 w-1.5 animate-pulse-soft rounded-full bg-wander" />
+            Catching up · {snap.pendingAiCount}
+          </span>
+        ) : (
+          <span className="text-[11px] text-parchment/55">Up to date</span>
+        )}
+      </div>
+
+      {snap.planBuiltAt ? (
+        <p className="mt-3 border-t border-white/[0.06] pt-3 text-[10px] text-parchment/40">
+          Last built{" "}
+          {new Date(snap.planBuiltAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+        </p>
+      ) : null}
+    </div>
+  );
+
   return (
-    <div className="flex min-h-screen flex-col bg-coal text-parchment">
+    <div className="flex min-h-screen flex-col bg-void text-parchment">
       <RoomTopBar roomId={roomId} participants={snap.participants} meId={meId} />
 
       <main className="flex-1">
@@ -321,193 +382,253 @@ export function GroupTripRoomClient({ roomId, initialSnapshot, initialMeId }: Pr
         >
           {/* Left: chat panel */}
           <section
-            className={`order-1 flex min-h-0 w-full min-w-0 flex-col gap-3 overflow-y-auto overflow-x-hidden overscroll-y-contain ${
+            className={`relative order-1 flex min-h-0 w-full min-w-0 flex-col gap-3 overflow-y-auto overflow-x-hidden overscroll-y-contain ${
               plan
                 ? "lg:order-1 lg:max-h-full lg:flex-[1.15_1_0] lg:min-w-[min(100%,420px)] lg:max-w-none"
-                : "lg:mx-auto lg:max-w-2xl lg:py-4"
+                : "lg:mx-auto lg:max-w-2xl lg:py-4 lg:justify-center"
             }`}
           >
-            <div className="relative z-10 rounded-3xl border border-white/[0.08] bg-black/35 p-4 shadow-xl shadow-black/30">
-              {/* Toggle row */}
-              <div className="mb-3 flex items-center justify-between gap-2">
-                <div className="flex items-center gap-1 rounded-full border border-white/10 bg-black/40 p-1 text-[11px]">
-                  <Link
-                    href="/"
-                    className="rounded-full px-3 py-1 text-parchment/60 hover:text-parchment"
-                  >
-                    Solo
-                  </Link>
-                  <span className="rounded-full bg-wander px-3 py-1 font-semibold text-ink">Group</span>
-                </div>
-                {snap.pendingAiCount > 0 ? (
-                  <span className="flex items-center gap-1.5 rounded-full border border-wander/30 bg-wander-muted/40 px-2.5 py-1 text-[10px] text-wander/95">
-                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-wander" />
-                    AI catching up · {snap.pendingAiCount}
-                  </span>
-                ) : (
-                  <span className="text-[10px] text-parchment/40">
-                    AI up to date
-                  </span>
-                )}
-              </div>
-
-              {!plan && (
-                <div className="mb-4 flex flex-col items-center text-center">
-                  <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-gradient-to-br from-white/[0.07] to-transparent shadow-lg shadow-black/40">
-                    <span className="font-serif text-xl text-parchment/95">W</span>
-                  </div>
-                  <h1 className="font-serif text-xl tracking-tight text-parchment sm:text-2xl">Plan together</h1>
-                  <p className="mt-1.5 max-w-md text-[12px] text-parchment/55">
-                    Everyone with the link drops what they want into the chat. Wander merges it on the side and the
-                    Build button unlocks when the AI has caught up to everything.
-                  </p>
-                </div>
-              )}
-
-              {/* Chat list */}
+            <motion.div
+              layout
+              className={`relative z-10 flex flex-col overflow-hidden rounded-3xl border border-white/[0.08] bg-black/40 p-4 shadow-2xl shadow-black/40 backdrop-blur-xl ${
+                plan
+                  ? "min-h-[460px] shrink-0 lg:h-[60vh] lg:min-h-[460px] lg:max-h-[680px]"
+                  : "min-h-[320px]"
+              }`}
+            >
+              <ShaderBackground
+                intensity={plan ? "low" : "med"}
+                className={plan ? "opacity-30" : "opacity-80"}
+              />
               <div
-                ref={chatScrollRef}
-                className="mb-3 min-h-[200px] space-y-2 overflow-y-auto overscroll-contain pr-1 max-h-[min(52vh,520px)] lg:max-h-[min(48vh,480px)]"
-              >
-                {snap.messages.length === 0 ? (
-                  <p className="px-1 py-6 text-center text-xs text-parchment/40">
-                    Be the first to say what you want from this trip.
-                  </p>
-                ) : null}
-                {snap.messages.map((m) => {
-                  const author = m.participantId ? participantsById[m.participantId] : null;
-                  const isMe = m.participantId === meId;
-                  return (
-                    <div
-                      key={m.id}
-                      className={`flex items-start gap-2 ${isMe ? "justify-end" : "justify-start"}`}
+                aria-hidden
+                className="pointer-events-none absolute inset-0 [border-radius:inherit] bg-gradient-to-b from-black/10 via-transparent to-black/40"
+              />
+
+              <div className="absolute right-3 top-3 z-20">
+                <SettingsPopover
+                  trigger={({ toggle, open }) => (
+                    <Button
+                      variant="icon"
+                      size="sm"
+                      aria-label="Room settings"
+                      aria-expanded={open}
+                      onClick={toggle}
                     >
-                      {!isMe && (
-                        <span
-                          aria-hidden
-                          className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[9px] font-bold text-black/80"
-                          style={{ background: author?.colorHex ?? "#888" }}
-                        >
-                          {initials(author?.displayName ?? "?")}
-                        </span>
-                      )}
-                      <div
-                        className={`max-w-[85%] rounded-2xl px-3 py-2 text-[13px] leading-relaxed ${
-                          isMe
-                            ? "bg-wander-muted/70 text-parchment"
-                            : "border border-white/[0.06] bg-black/30 text-parchment/90"
-                        }`}
+                      <svg
+                        width="15"
+                        height="15"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden
                       >
-                        {!isMe && author && (
-                          <p
-                            className="mb-0.5 text-[10px] font-semibold uppercase tracking-widest"
-                            style={{ color: author.colorHex }}
-                          >
-                            {author.displayName}
-                          </p>
-                        )}
-                        <p className="whitespace-pre-wrap">{m.content}</p>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Composer */}
-              <div className="rounded-2xl border border-white/[0.08] bg-black/35 p-1 shadow-inner shadow-black/20">
-                <div className="flex items-center justify-between gap-2 border-b border-white/[0.06] px-2.5 py-1.5">
-                  <p className="flex min-w-0 flex-1 items-center gap-1.5 text-[10px] text-parchment/45">
-                    <span className="text-wander/75" aria-hidden>↯</span>
-                    <span className="truncate">
-                      Just say what you want — no need to wait for AI between messages.
-                    </span>
-                  </p>
-                  <span className="flex shrink-0 items-center gap-1 text-[10px] text-wander/90">
-                    <span className="h-1.5 w-1.5 rounded-full bg-wander shadow-[0_0_8px_rgba(52,211,153,0.45)]" />
-                    Live
-                  </span>
-                </div>
-                <div className="flex flex-col gap-2 p-2 sm:flex-row sm:items-end">
-                  <textarea
-                    rows={2}
-                    className="min-h-[44px] w-full flex-1 resize-none rounded-xl border border-transparent bg-transparent px-2 py-2 text-sm text-parchment placeholder:text-parchment/35 outline-none focus:border-wander/30 disabled:opacity-50 sm:min-w-0"
-                    placeholder={sendDisabled ? "Joining…" : "Type what you want from this trip…"}
-                    value={draft}
-                    disabled={sendDisabled}
-                    onChange={(e) => setDraft(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && !e.shiftKey) {
-                        e.preventDefault();
-                        sendMessage(draft);
-                      }
-                    }}
-                  />
-                  <div className="flex w-full shrink-0 gap-2 sm:w-auto sm:justify-end">
-                    <button
-                      type="button"
-                      onClick={onBuild}
-                      disabled={buildDisabled}
-                      title={buildDisabled ? buildLabel : "Generate itinerary from the unified draft"}
-                      className={`min-h-[44px] flex-1 rounded-xl border px-3 py-2 text-xs font-semibold transition sm:flex-initial sm:min-w-[8.5rem] ${
-                        buildDisabled
-                          ? "cursor-not-allowed border-white/20 bg-white/[0.06] text-parchment/45"
-                          : "border-wander/60 bg-wander text-ink shadow-[0_0_20px_rgba(52,211,153,0.25)] hover:bg-wander/95"
-                      } ${buildBusy ? "opacity-70" : ""}`}
-                    >
-                      {buildLabel}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => sendMessage(draft)}
-                      disabled={!draft.trim() || sendDisabled}
-                      className="min-h-[44px] flex-1 rounded-xl bg-wander/90 px-3 py-2 text-xs font-semibold text-ink shadow-md shadow-black/30 transition hover:bg-wander disabled:cursor-not-allowed disabled:opacity-40 sm:flex-initial sm:min-w-[4.5rem]"
-                    >
-                      Send
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* Unified draft strip */}
-              <div className="mt-3 border-t border-white/[0.06] pt-3">
-                <div className="flex items-center justify-between">
-                  <p className="text-[10px] uppercase tracking-widest text-parchment/45">Unified draft</p>
-                  {snap.planBuiltAt && (
-                    <p className="text-[10px] text-parchment/40">
-                      Last built {new Date(snap.planBuiltAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
-                    </p>
+                        <circle cx="12" cy="12" r="3" />
+                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09A1.65 1.65 0 0 0 15 4.6a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.36.86.97 1.51 1.85 1.51H21a2 2 0 1 1 0 4h-.09c-.88 0-1.49.65-1.51 1.49Z" />
+                      </svg>
+                    </Button>
                   )}
-                </div>
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  {draftRows.map((r) => {
-                    const c = conflictsByField.get(r.key);
-                    return (
-                      <span
-                        key={r.key}
-                        title={
-                          c
-                            ? `conflict — ${c.values
-                                .map((v) => `${participantsById[v.participantId]?.displayName ?? "?"}: ${String(v.value)}`)
-                                .join(" · ")}`
-                            : undefined
-                        }
-                        className={`rounded-full border px-2.5 py-1 text-[11px] ${
-                          c
-                            ? "border-amber-500/40 bg-amber-500/[0.08] text-amber-200"
-                            : "border-white/10 bg-white/[0.04] text-parchment/80"
-                        }`}
-                      >
-                        {r.label}
-                        {c ? " ⚠" : ""}
-                      </span>
-                    );
-                  })}
-                </div>
+                >
+                  {({ close }) => settingsContent(close)}
+                </SettingsPopover>
               </div>
-            </div>
 
-            {plan && (
-              <>
+              <div className={`relative z-10 flex min-h-0 flex-1 flex-col ${plan ? "pr-10" : ""}`}>
+                <AnimatePresence initial={false}>
+                  {!plan ? (
+                    <motion.div
+                      key="hero"
+                      initial="hidden"
+                      animate="visible"
+                      exit={{ opacity: 0, y: -8, height: 0 }}
+                      variants={staggerChildren(0.04, 0.08)}
+                      className="mb-4 flex flex-col items-center text-center"
+                    >
+                      <motion.div
+                        variants={slideUp}
+                        className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-gradient-to-br from-white/[0.07] to-transparent shadow-lg shadow-black/40"
+                      >
+                        <WanderIcon size={28} strokeWidth={2.25} />
+                      </motion.div>
+                      <motion.h1
+                        variants={slideUp}
+                        className="font-serif text-xl tracking-tight text-parchment sm:text-2xl"
+                      >
+                        Plan together
+                      </motion.h1>
+                      <motion.p
+                        variants={slideUp}
+                        className="mt-1.5 max-w-md text-[12px] text-parchment/55"
+                      >
+                        Everyone with the link drops what they want into the chat. Wander merges it
+                        on the side and Build unlocks when the AI has caught up.
+                      </motion.p>
+                    </motion.div>
+                  ) : null}
+                </AnimatePresence>
+
+                {/* Chat list */}
+                <div
+                  ref={chatScrollRef}
+                  className="wander-scroll mb-3 min-h-[200px] space-y-2 overflow-y-auto overscroll-contain pr-1 max-h-[min(52vh,520px)] lg:max-h-[min(48vh,480px)]"
+                >
+                  {snap.messages.length === 0 ? (
+                    <p className="px-1 py-6 text-center text-xs text-parchment/40">
+                      Be the first to say what you want from this trip.
+                    </p>
+                  ) : null}
+                  <AnimatePresence initial={false}>
+                    {snap.messages.map((m) => {
+                      const author = m.participantId ? participantsById[m.participantId] : null;
+                      const isMe = m.participantId === meId;
+                      return (
+                        <MessageBubble
+                          key={m.id}
+                          side={isMe ? "right" : "left"}
+                          className="items-start gap-2"
+                        >
+                          {!isMe ? (
+                            <span
+                              aria-hidden
+                              className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[9px] font-bold text-black/80"
+                              style={{ background: author?.colorHex ?? "#888" }}
+                            >
+                              {initials(author?.displayName ?? "?")}
+                            </span>
+                          ) : null}
+                          <div
+                            className={`max-w-[85%] rounded-2xl px-3 py-2 text-[13px] leading-relaxed ${
+                              isMe
+                                ? "bg-wander-muted/70 text-parchment shadow-[0_8px_30px_-12px_rgba(52,211,153,0.45)]"
+                                : "border border-white/[0.06] bg-black/30 text-parchment/90"
+                            }`}
+                          >
+                            {!isMe && author ? (
+                              <p
+                                className="mb-0.5 text-[10px] font-semibold uppercase tracking-[0.18em]"
+                                style={{ color: author.colorHex }}
+                              >
+                                {author.displayName}
+                              </p>
+                            ) : null}
+                            <p className="whitespace-pre-wrap">{m.content}</p>
+                          </div>
+                        </MessageBubble>
+                      );
+                    })}
+                  </AnimatePresence>
+                </div>
+
+                {/* Composer */}
+                <motion.div
+                  layout
+                  className="rounded-2xl border border-white/[0.08] bg-black/40 p-1 shadow-inner shadow-black/30 backdrop-blur-sm transition-colors focus-within:border-wander/30"
+                >
+                  <div className="flex flex-col gap-2 p-2 sm:flex-row sm:items-end">
+                    <textarea
+                      rows={2}
+                      className="min-h-[44px] w-full flex-1 resize-none rounded-xl border border-transparent bg-transparent px-2 py-2 text-sm text-parchment placeholder:text-parchment/35 outline-none focus:border-transparent disabled:opacity-50 sm:min-w-0"
+                      placeholder={sendDisabled ? "Joining…" : "Type what you want from this trip…"}
+                      value={draft}
+                      disabled={sendDisabled}
+                      onChange={(e) => setDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault();
+                          sendMessage(draft);
+                        }
+                      }}
+                    />
+                    <div className="flex w-full shrink-0 gap-2 sm:w-auto sm:justify-end">
+                      <Button
+                        variant={buildDisabled ? "ghost" : "primary"}
+                        size="md"
+                        onClick={onBuild}
+                        disabled={buildDisabled}
+                        loading={buildBusy}
+                        shimmer={!buildDisabled && !buildBusy}
+                        title={buildDisabled ? buildLabel : "Generate itinerary from the unified draft"}
+                        className="flex-1 sm:flex-initial sm:min-w-[8.5rem]"
+                      >
+                        {buildLabel}
+                      </Button>
+                      <Button
+                        variant="primary"
+                        size="md"
+                        onClick={() => sendMessage(draft)}
+                        disabled={!draft.trim() || sendDisabled}
+                        className="flex-1 sm:flex-initial sm:min-w-[5rem]"
+                      >
+                        Send
+                      </Button>
+                    </div>
+                  </div>
+                </motion.div>
+
+                {/* Unified draft — collapsed under an accordion */}
+                {draftRows.length > 0 ? (
+                  <div className="mt-3 border-t border-white/[0.06] pt-3">
+                    <Accordion
+                      defaultOpen={false}
+                      title={
+                        <span className="inline-flex items-center gap-2">
+                          Trip status
+                          {snap.conflicts.length > 0 ? (
+                            <span className="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-amber-200">
+                              {snap.conflicts.length} conflict{snap.conflicts.length === 1 ? "" : "s"}
+                            </span>
+                          ) : null}
+                        </span>
+                      }
+                    >
+                      <div className="flex flex-wrap gap-1.5">
+                        {draftRows.map((r) => {
+                          const c = conflictsByField.get(r.key);
+                          return (
+                            <motion.span
+                              key={r.key}
+                              layout
+                              initial={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.95 }}
+                              animate={{ opacity: 1, scale: 1 }}
+                              transition={springSoft}
+                              title={
+                                c
+                                  ? `conflict — ${c.values
+                                      .map(
+                                        (v) =>
+                                          `${participantsById[v.participantId]?.displayName ?? "?"}: ${String(v.value)}`,
+                                      )
+                                      .join(" · ")}`
+                                  : undefined
+                              }
+                              className={`rounded-full border px-2.5 py-1 text-[11px] transition-colors ${
+                                c
+                                  ? "border-amber-500/40 bg-amber-500/[0.08] text-amber-200"
+                                  : "border-white/10 bg-white/[0.04] text-parchment/80"
+                              }`}
+                            >
+                              {r.label}
+                              {c ? " ⚠" : ""}
+                            </motion.span>
+                          );
+                        })}
+                      </div>
+                    </Accordion>
+                  </div>
+                ) : null}
+              </div>
+            </motion.div>
+
+            {plan ? (
+              <motion.div
+                initial={reduce ? { opacity: 0 } : { opacity: 0, y: 16 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.32, ease: easeOutQuart, delay: 0.08 }}
+                className="flex flex-col gap-3"
+              >
                 <TripSummary
                   plan={plan}
                   weather={snap.planWeather}
@@ -516,7 +637,7 @@ export function GroupTripRoomClient({ roomId, initialSnapshot, initialMeId }: Pr
                   totalDistanceKm={null}
                   stopCount={scheduled.length}
                 />
-                <h3 className="text-xs uppercase tracking-widest text-parchment/50">Timeline</h3>
+                <h3 className="text-xs uppercase tracking-[0.18em] text-parchment/45">Timeline</h3>
                 <TripTimeline
                   dayNumbers={dayNumbers}
                   activeDay={activeDay}
@@ -528,46 +649,63 @@ export function GroupTripRoomClient({ roomId, initialSnapshot, initialMeId }: Pr
                   onExpandStop={setSelectedStopId}
                   mapboxAccessToken={mapboxToken}
                 />
-              </>
-            )}
+              </motion.div>
+            ) : null}
           </section>
 
           {/* Right: map */}
-          {plan ? (
-            <section className="order-2 relative h-[42vh] min-h-[280px] w-full min-w-0 shrink-0 overflow-hidden rounded-2xl border border-white/10 lg:h-auto lg:min-h-0 lg:flex-[1.35_1_0] lg:min-w-[min(100%,360px)]">
-              {mapboxToken ? (
-                <TripMap
-                  mapboxToken={mapboxToken}
-                  plan={plan}
-                  activeDay={activeDay}
-                  selectedStopId={selectedStopId}
-                  onSelectStop={setSelectedStopId}
-                  routeFeature={null}
-                />
-              ) : (
-                <div className="grid h-full place-items-center text-xs text-parchment/40">
-                  Set NEXT_PUBLIC_MAPBOX_TOKEN to enable the map.
-                </div>
-              )}
-              {buildBusy ? (
-                <div
-                  className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-end gap-2 bg-gradient-to-t from-black/75 via-black/35 to-transparent pb-6 pt-16"
-                  aria-live="polite"
-                  aria-busy="true"
-                >
-                  <div className="flex items-center gap-2 rounded-full border border-wander/25 bg-black/70 px-3 py-1.5 shadow-lg backdrop-blur-sm">
-                    <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-wander/25 border-t-wander" />
-                    <span className="text-[11px] font-medium text-parchment/95">Building shared itinerary…</span>
+          <AnimatePresence>
+            {plan ? (
+              <motion.section
+                key="room-map"
+                initial={reduce ? { opacity: 0 } : { opacity: 0, x: 24 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={reduce ? { opacity: 0 } : { opacity: 0, x: 24 }}
+                transition={{ duration: 0.42, ease: easeOutQuart, delay: 0.05 }}
+                className="order-2 relative h-[42vh] min-h-[280px] w-full min-w-0 shrink-0 overflow-hidden rounded-2xl border border-white/10 lg:h-auto lg:min-h-0 lg:flex-[1.35_1_0] lg:min-w-[min(100%,360px)]"
+              >
+                {mapboxToken ? (
+                  <TripMap
+                    mapboxToken={mapboxToken}
+                    plan={plan}
+                    activeDay={activeDay}
+                    selectedStopId={selectedStopId}
+                    onSelectStop={setSelectedStopId}
+                    routeFeature={null}
+                  />
+                ) : (
+                  <div className="grid h-full place-items-center text-xs text-parchment/40">
+                    Set NEXT_PUBLIC_MAPBOX_TOKEN to enable the map.
                   </div>
-                </div>
-              ) : null}
-            </section>
-          ) : null}
+                )}
+                <AnimatePresence>
+                  {buildBusy ? (
+                    <motion.div
+                      key="build-busy"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      transition={{ duration: 0.22 }}
+                      className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-end gap-2 bg-gradient-to-t from-black/75 via-black/35 to-transparent pb-6 pt-16"
+                      aria-live="polite"
+                      aria-busy="true"
+                    >
+                      <div className="flex items-center gap-2 rounded-full border border-wander/25 bg-black/70 px-3 py-1.5 shadow-lg backdrop-blur-sm">
+                        <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-wander/25 border-t-wander" />
+                        <span className="text-[11px] font-medium text-parchment/95">
+                          Building shared itinerary…
+                        </span>
+                      </div>
+                    </motion.div>
+                  ) : null}
+                </AnimatePresence>
+              </motion.section>
+            ) : null}
+          </AnimatePresence>
         </div>
       </main>
 
       {!meId && <RoomJoinModal roomId={roomId} onJoined={onJoined} />}
-      <RoomErrorToast message={error} onDismiss={() => setError(null)} />
     </div>
   );
 }
