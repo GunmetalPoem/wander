@@ -56,18 +56,34 @@ The commit history shows the project finding its shape: it started broader (a "q
 
 This is a product, so it's evaluated the way a product is — by whether the output is correct, usable, and better than the naive baseline. The validation is mostly qualitative and is described honestly below.
 
-**Validation strategy built into the system:**
+### Quantitative benchmark: the route optimizer (`npm run eval`)
+
+The core technical claim — *"Wander turns a raw LLM place-list into a route you could actually walk"* — is measured directly. `tools/eval/route-optimizer-eval.ts` feeds the optimizer realistic days (real venue coordinates for **5 cities**, authored in the zig-zag order a raw model typically emits) and measures straight-line path length before vs. after, using an **independent** haversine so the measurement doesn't just echo the implementation. It's fully deterministic — no API keys or network. Full report: [`docs/eval-results.md`](docs/eval-results.md).
+
+**Results:**
+
+| Metric | Result |
+| --- | --- |
+| Total path distance | **169.1 km → 119.0 km (−29.6%)** |
+| Mean reduction per day | **22.4%** |
+| Days improved | 5 / 6 (best: NYC −45.3%, Tokyo −37.5%) |
+| Invariant — optimizer never lengthens a day | ✅ PASS |
+| Invariant — never reorders a later daypart before an earlier one | ✅ PASS |
+
+**This benchmark drove a real fix.** Its first run *failed* the "never lengthens a day" invariant — one day (Paris d2) came out **2% longer**, because greedy nearest-neighbor plus bucket-constrained 2-opt can, on some geometries, beat itself. That falsified an earlier assumption that the optimizer was non-worsening by construction. The fix (`trip-optimize.ts`): fall back to the original ordering whenever it was already time-valid and shorter. After the fix, both invariants pass and the regression is gone (0.0%). This is exactly the kind of thing evaluation is supposed to catch.
+
+**Other validation built into the system:**
 - **Schema-level correctness.** Every model response is parsed and validated against a Zod schema twice (per-day fragment and final assembled plan). Malformed days are discarded with a named warning (`day_N_invalid`) rather than rendered.
 - **Layered fallbacks as a robustness test.** The streaming parser falls back to whole-envelope parsing; geocoding falls back Google → Mapbox → Photon; routing falls back to OSRM. Each fallback path is exercised by simply running without the corresponding key.
-- **A measurable optimization claim.** The 2-opt pass only ever *accepts* a reordering if it strictly shortens total path length (`pathLengthKm`). So the optimizer is, by construction, a non-worsening transformation on within-day travel distance — the one quantitative guarantee in the system.
 
-**How it was tested:**
-- **Manual testing across many cities and shapes** (well-known and ambiguous city names, 1–7 day trips, walking vs. driving, packed vs. relaxed, accessibility on/off) to check that routes stay in-neighborhood, meals land at meal times, and stops resolve to real coordinates.
-- **Baseline comparison.** The same prompt to a raw LLM (no geocoding, no optimizer) produces lists that frequently double back across town; Wander's post-processing visibly tightens the route on the map. The map itself is the evaluation surface — a bad route is immediately obvious.
+**How it was tested manually:**
+- **Across many cities and shapes** (well-known and ambiguous city names, 1–7 day trips, walking vs. driving, packed vs. relaxed, accessibility on/off) to check that routes stay in-neighborhood, meals land at meal times, and stops resolve to real coordinates.
 - **Demo as a reproducibility check.** The "Load SF demo" path renders a known-good plan without any external calls, so the rendering/map pipeline can be verified independently of the model.
 
+**User research.** [`docs/user-research.md`](docs/user-research.md) holds the target personas, design hypotheses, and a ready-to-run interview guide that shaped the build. Note it honestly: that document contains design reasoning and *anticipated* feedback, **not** transcripts of conducted interviews — a formal user study has not been run yet, and the doc is explicit about which decisions were real (tied to git history) versus projected.
+
 **Known limitations & failure analysis (honest):**
-- No automated test suite yet — validation is manual plus runtime schema checks. This is the biggest gap.
+- No unit/integration test suite yet. There is an automated, deterministic **benchmark** for the optimizer (`npm run eval`) and runtime schema validation, but the rest is validated manually. Broadening automated coverage is the biggest remaining gap.
 - Itinerary *quality* (are these genuinely the best places?) depends on the LLM and is not independently benchmarked against expert-curated guides.
 - Geocoding can occasionally resolve a chain to the wrong branch; the prompt asks for the closest branch but this isn't verified post-hoc.
 - The optimizer guarantees shorter *straight-line* paths, not shorter real travel time, and time-of-day ordering uses heuristics (keyword meal detection) that can misclassify edge cases.

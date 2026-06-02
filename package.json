@@ -11,6 +11,7 @@
     "build": "prisma generate && next build",
     "start": "next start",
     "lint": "next lint",
+    "eval": "node tools/eval/route-optimizer-eval.ts",
     "db:push": "prisma db push",
     "db:seed": "prisma db seed",
     "postinstall": "prisma generate"

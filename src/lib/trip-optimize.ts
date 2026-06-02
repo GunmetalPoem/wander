@@ -165,6 +165,11 @@ function reorderStopsByProximity(stops: TripStop[], start: Center): TripStop[] {
   return out;
 }
 
+/** Total straight-line path length over a day's geocoded stops (others ignored). */
+function totalPathKm(stops: TripStop[]): number {
+  return pathLengthKm(stops.filter(hasCoords));
+}
+
 function dayAnchorCenter(plan: TripPlan, day: TripDay): Center | null {
   const cc = plan.trip.city_center;
   if (cc && Number.isFinite(cc.lat) && Number.isFinite(cc.lng) && !(cc.lat === 0 && cc.lng === 0)) {
@@ -187,6 +192,13 @@ export function optimizeTripPlanForCloseness(plan: TripPlan): TripPlan {
     if (coordCount < 3) return d;
     const reordered = reorderStopsByProximity(d.stops, start);
     const refined = twoOptOpenPath(reordered);
+    // Guarantee non-worsening: greedy NN (anchored at city center) + bucket-
+    // constrained 2-opt can, on some geometries, end up slightly longer than the
+    // input. If the original order was already in valid (non-decreasing) time
+    // order and is shorter, keep it — never ship a longer day than we were given.
+    if (timeOrderNonDecreasing(d.stops) && totalPathKm(d.stops) + 1e-9 < totalPathKm(refined)) {
+      return d;
+    }
     return { ...d, stops: refined };
   });
   return { ...plan, trip: { ...plan.trip, days } };
