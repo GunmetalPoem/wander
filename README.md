@@ -2,7 +2,7 @@
 
 Wander is a full-stack web app that turns a few preferences ("3 days in Lisbon, foodie + history, relaxed pace, wheelchair-friendly") into a **geographically coherent, day-by-day itinerary on an interactive 3D map** — and lets a whole group co-plan one trip from a single shareable link.
 
-It is built with Next.js 15, TypeScript, Mapbox GL, and Prisma, and uses Claude / GPT to generate itineraries that are then geocoded, route-optimized, weather-checked, and enriched with real venue details.
+It is built with Next.js 15, TypeScript, Mapbox GL, and Prisma, and uses OpenAI (GPT) to generate itineraries that are then geocoded, route-optimized, weather-checked, and enriched with real venue details.
 
 > **Try it in 60 seconds, no API keys:** run the app and click **Load SF demo** on the home page for a fully rendered San Francisco day on the map. Add an API key to generate live trips for any city.
 
@@ -47,7 +47,7 @@ Wander is a substantial, working application — **~9,900 lines of TypeScript/TS
 - **Deterministic route optimizer** (`trip-optimize.ts`): groups stops into time-of-day buckets (with meal-stop nudges so lunch isn't routed before the morning sights), does greedy nearest-neighbor from the city center within each bucket, then runs **2-opt segment reversal** to shorten the open path — all while keeping the timeline non-decreasing.
 - **Multi-provider geocoding** (Google Places → Mapbox) with **OSRM** routing and **Photon** geocoding as keyless fallbacks, and concurrency-limited batch geocoding.
 - **Strict schema validation** (Zod) at every boundary, with graceful degradation: a failed day is dropped with a warning instead of crashing the trip.
-- **Provider abstraction**: Anthropic Claude is primary, OpenAI is an automatic fallback; both share one streaming interface.
+- **Provider abstraction**: OpenAI (GPT) is the LLM used; the code also supports Anthropic Claude behind the same streaming interface (used in preference if `ANTHROPIC_API_KEY` is set).
 
 ### Evidence of iteration
 The commit history shows the project finding its shape: it started broader (a "quest feed" and "lab" that were **deliberately cut** to focus the product), was rebranded to Wander, then grew numeric budgets / accessibility / weather, then group rooms, then the chat-first redesign, and finally day-by-day streaming. Scope was narrowed on purpose, not by accident — see `git log`.
@@ -98,7 +98,7 @@ These are documented rather than hidden because knowing where it breaks is part 
 ## 4. Demo & screenshots (communication)
 
 - **Fastest path:** `npm run dev` → open `http://localhost:3000` → **Load SF demo** (no keys needed).
-- **Live generation:** add `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`) and `NEXT_PUBLIC_MAPBOX_TOKEN`, then type a city and **Generate trip**.
+- **Live generation:** add `OPENAI_API_KEY`, `NEXT_PUBLIC_MAPBOX_TOKEN`, and `GOOGLE_PLACES_API_KEY`, then type a city and **Generate trip**.
 - **Group flow:** create a room, open the link in a second browser, give each "person" different preferences, and build one shared itinerary.
 
 > _Add a short screen recording and a couple of screenshots here for reviewers who won't run it locally — e.g. `docs/demo.mp4`, `docs/solo.png`, `docs/room.png`._
@@ -109,31 +109,40 @@ These are documented rather than hidden because knowing where it breaks is part 
 
 ### Requirements
 - Node 20+
-- At least one of `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` for live trip generation (the SF demo needs neither)
-- `NEXT_PUBLIC_MAPBOX_TOKEN` for the map (get one free at [Mapbox](https://account.mapbox.com/))
+- `OPENAI_API_KEY` — the LLM that generates itineraries (the SF demo needs no key)
+- `NEXT_PUBLIC_MAPBOX_TOKEN` — the map, geocoding, and directions ([free Mapbox token](https://account.mapbox.com/))
+- `GOOGLE_PLACES_API_KEY` — place resolution & city confirmation
+- A SQLite database via `DATABASE_URL` (`prisma db push` creates it) — used by the group rooms
 
 ### Quickstart
 ```bash
 cp .env.example .env      # then add your keys (see table below)
 npm install
-npx prisma db push        # creates the local SQLite DB (needed for group rooms)
+npx prisma db push        # creates the local SQLite DB
 npm run dev               # http://localhost:3000
 ```
 
 ### Environment variables
 
+**Required:**
+
 | Variable | Purpose |
 | --- | --- |
-| `ANTHROPIC_API_KEY` | Primary trip generation (Claude) |
-| `OPENAI_API_KEY` | Fallback trip generation + stop-details parsing |
-| `NEXT_PUBLIC_MAPBOX_TOKEN` / `MAPBOX_ACCESS_TOKEN` | Map render + geocoding + directions (server token optional) |
-| `GOOGLE_PLACES_API_KEY` / `GOOGLE_MAPS_API_KEY` | Higher-quality place search & city confirmation |
-| `DATABASE_URL` | SQLite via Prisma (required for group rooms) |
-| `ANTHROPIC_MODEL` / `OPENAI_MODEL` | Override default models |
-| `LORE_USE_FERRET`, `LORE_FERRET_CDP`, `FERRET_PATH` | Optional [MontFerret CLI](https://github.com/MontFerret/cli) for JS-heavy venue pages |
-| `LORE_USE_SCRAPY`, `LORE_PYTHON` | Optional [Scrapy](https://github.com/scrapy/scrapy) for heavier HTML extraction |
+| `OPENAI_API_KEY` | Trip generation + stop-details parsing (the LLM) |
+| `NEXT_PUBLIC_MAPBOX_TOKEN` / `MAPBOX_ACCESS_TOKEN` | Map render + geocoding + directions |
+| `GOOGLE_PLACES_API_KEY` / `GOOGLE_MAPS_API_KEY` | Place search & city confirmation |
+| `DATABASE_URL` | SQLite via Prisma |
 
-Without Mapbox/Google keys, the app falls back to keyless **OSRM** (routing) and **Photon** (geocoding) where possible.
+**Optional:**
+
+| Variable | Purpose |
+| --- | --- |
+| `ANTHROPIC_API_KEY` | Alternative LLM provider — the code also supports Claude, used in preference to OpenAI if set |
+| `OPENAI_MODEL` / `ANTHROPIC_MODEL` | Override default models |
+| `LORE_USE_FERRET`, `LORE_FERRET_CDP`, `FERRET_PATH` | [MontFerret CLI](https://github.com/MontFerret/cli) for JS-heavy venue pages |
+| `LORE_USE_SCRAPY`, `LORE_PYTHON` | [Scrapy](https://github.com/scrapy/scrapy) for heavier HTML extraction |
+
+If a Mapbox or Google key is missing, the app degrades to keyless **OSRM** (routing) and **Photon** (geocoding) where possible, but Mapbox + Google Places are the intended setup.
 
 ---
 
@@ -168,10 +177,10 @@ Prisma + SQLite (TripRoom, RoomParticipant, RoomMessage, ParticipantPreferences)
 
 ## 7. Process, integrity & disclosure
 
-**AI usage in building this project.** This project was developed with heavy AI assistance, including Claude Code, used for scaffolding, refactors, and parts of the implementation. All AI-generated code was reviewed, integrated, tested, and iterated on by the author; the architectural decisions (the deterministic-routing-over-LLM split, the group-room model, day-by-day streaming) and the product direction are the author's. The application itself also *uses* LLMs at runtime (Claude / GPT) as its core feature — that is the product, and it is disclosed to users (e.g. "Generate trip" requires an API key).
+**AI usage in building this project.** This project was developed with heavy AI assistance, including Claude Code, used for scaffolding, refactors, and parts of the implementation. All AI-generated code was reviewed, integrated, tested, and iterated on by the author; the architectural decisions (the deterministic-routing-over-LLM split, the group-room model, day-by-day streaming) and the product direction are the author's. The application itself also *uses* an LLM at runtime (OpenAI GPT; Claude also supported) as its core feature — that is the product, and it is disclosed to users (e.g. "Generate trip" requires an API key).
 
 **Sources, services & credits.**
-- **Models / APIs:** Anthropic Claude, OpenAI GPT.
+- **Models / APIs:** OpenAI GPT (the LLM used); Anthropic Claude also supported in code.
 - **Maps & geodata:** [Mapbox GL](https://www.mapbox.com/) (map + geocoding + directions), [Google Places/Maps](https://developers.google.com/maps) (optional place search), [OSRM](https://project-osrm.org/) (keyless routing fallback), [Photon / Komoot](https://photon.komoot.io/) (keyless geocoding fallback).
 - **Weather:** [Open-Meteo](https://open-meteo.com/) (no key required).
 - **Key libraries:** Next.js, React, Prisma, Tailwind CSS, framer-motion, `@dnd-kit`, Zod, Cheerio, `react-map-gl`, `lucide-react`. Optional fetch tooling: [MontFerret](https://github.com/MontFerret/cli), [Scrapy](https://github.com/scrapy/scrapy).
