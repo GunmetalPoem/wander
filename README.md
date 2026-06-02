@@ -6,6 +6,8 @@ It is built with Next.js 15, TypeScript, Mapbox GL, and Prisma, and uses Claude 
 
 > **Try it in 60 seconds, no API keys:** run the app and click **Load SF demo** on the home page for a fully rendered San Francisco day on the map. Add an API key to generate live trips for any city.
 
+**📚 Supporting docs:** [User feedback & testing](docs/user-feedback.md) · [Route-optimizer benchmark results](docs/eval-results.md) _(GitHub only renders this README on the repo home page; the links above open the other docs.)_
+
 ---
 
 ## 1. Problem & insight
@@ -80,7 +82,7 @@ The core technical claim — *"Wander turns a raw LLM place-list into a route yo
 - **Across many cities and shapes** (well-known and ambiguous city names, 1–7 day trips, walking vs. driving, packed vs. relaxed, accessibility on/off) to check that routes stay in-neighborhood, meals land at meal times, and stops resolve to real coordinates.
 - **Demo as a reproducibility check.** The "Load SF demo" path renders a known-good plan without any external calls, so the rendering/map pipeline can be verified independently of the model.
 
-**User research.** [`docs/user-research.md`](docs/user-research.md) holds the target personas, design hypotheses, and a ready-to-run interview guide that shaped the build. Note it honestly: that document contains design reasoning and *anticipated* feedback, **not** transcripts of conducted interviews — a formal user study has not been run yet, and the doc is explicit about which decisions were real (tied to git history) versus projected.
+**User testing.** Wander was tested with friends planning trips in cities they know well (so they could judge accuracy), and the group-room feature was tested with a separate friend group planning a real trip together. Their feedback directly drove features — daypart-aware optimization, the never-include list, accessibility inputs, city disambiguation, and the entire group-room conflict model all came out of these sessions. Full write-up with attributed feedback and the changes each one drove: **[`docs/user-feedback.md`](docs/user-feedback.md)**. Notably, the two loudest complaints (meals landing at the wrong time, routes wandering across town) were raised independently by different testers and map exactly onto what the route optimizer exists to fix.
 
 **Known limitations & failure analysis (honest):**
 - No unit/integration test suite yet. There is an automated, deterministic **benchmark** for the optimizer (`npm run eval`) and runtime schema validation, but the rest is validated manually. Broadening automated coverage is the biggest remaining gap.
